@@ -1,0 +1,13 @@
+{
+  "name": "capstone-project",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix puzzle-game run dev",
+    "build": "npm --prefix puzzle-game run build",
+    "lint": "npm --prefix puzzle-game run lint",
+    "test": "npm --prefix puzzle-game run test",
+    "check": "npm --prefix puzzle-game run check",
+    "doctor": "npm --prefix puzzle-game run doctor",
+    "preview": "npm --prefix puzzle-game run preview"
+  }
+}
