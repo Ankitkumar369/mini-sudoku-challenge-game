@@ -1,26 +1,2 @@
 ﻿# Mini Sudoko Challenge Game
 
-This repository contains the capstone project workspace.
-
-## Run locally
-
-```bash
-npm install
-npm run dev
-```
-
-## Quality checks
-
-```bash
-npm run check
-```
-
-## Deploy to Vercel
-
-1. Push this repository to GitHub.
-2. Import project in Vercel.
-3. Set Vercel Root Directory to `puzzle-game`.
-4. Add environment variables from `puzzle-game/.env.example`.
-5. Deploy.
-
-Detailed project documentation is available in `puzzle-game/README.md`.
