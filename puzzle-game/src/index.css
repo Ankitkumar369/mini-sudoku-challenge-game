@@ -1,16 +1,62 @@
+@import url("https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
   color-scheme: light;
+  --bs-primary: #eb5b2c;
+  --bs-primary-soft: #f8c9b4;
+  --bs-neutral: #e8e6e6;
+  --bs-ink: #241f20;
+  --bs-secondary: #2c3188;
+  --bs-secondary-deep: #181f58;
+  --bs-secondary-night: #0c1a4b;
+  --bs-secondary-mid: #182965;
 }
 
 body {
-  @apply m-0 min-h-screen bg-slate-950 text-slate-100 antialiased;
-  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  @apply m-0 min-h-screen antialiased;
+  background-color: var(--bs-secondary-night);
+  color: var(--bs-neutral);
+  font-family: "Poppins", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
 }
 
 * {
   box-sizing: border-box;
+}
+
+@keyframes completionPulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 rgba(235, 91, 44, 0);
+  }
+  50% {
+    transform: scale(1.01);
+    box-shadow: 0 0 24px rgba(235, 91, 44, 0.25);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 rgba(235, 91, 44, 0);
+  }
+}
+
+@keyframes achievementEnter {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-completion {
+  animation: completionPulse 420ms ease-out;
+}
+
+.animate-achievement {
+  animation: achievementEnter 320ms ease-out;
 }

@@ -1,12 +1,15 @@
+// Imports: auth SDK utilities and environment helper for API URL resolution.
 import { GoogleAuthProvider, signInWithPopup, signOut } from "firebase/auth";
 import { auth } from "../lib/firebase";
 import { env } from "../lib/env";
 
+// Supports same-origin and deployed API base URL configuration.
 function makeApiUrl(path) {
   const base = env.apiBaseUrl || "";
   return `${base}${path}`;
 }
 
+// Converts provider-specific user shape to one app user contract.
 function normalizeUser(rawUser, provider) {
   return {
     id: rawUser.uid || rawUser.id || "",
@@ -18,6 +21,7 @@ function normalizeUser(rawUser, provider) {
   };
 }
 
+// Shared response parser so all auth requests throw consistent errors.
 async function parseJsonResponse(response) {
   const payload = await response.json().catch(() => ({}));
 
@@ -33,6 +37,7 @@ export async function signInWithGoogle() {
     throw new Error("Firebase is not configured. Add VITE_FIREBASE_* variables.");
   }
 
+  // Firebase popup sign-in handles Google OAuth in browser.
   const provider = new GoogleAuthProvider();
   const result = await signInWithPopup(auth, provider);
 
@@ -40,6 +45,7 @@ export async function signInWithGoogle() {
 }
 
 export async function signInAsGuest() {
+  // Guest id is local-only identity; avoids backend auth dependency.
   const random = Math.floor(Math.random() * 100000)
     .toString()
     .padStart(5, "0");
@@ -61,6 +67,7 @@ export async function signOutUser() {
 }
 
 export async function startTruecallerFlow() {
+  // Backend prepares signed authorize URL; frontend only redirects.
   const response = await fetch(makeApiUrl("/api/auth/truecaller/start"), {
     method: "POST",
     headers: {
@@ -77,6 +84,7 @@ export async function startTruecallerFlow() {
     throw new Error("Truecaller authorize URL was not returned by backend");
   }
 
+  // Full-page redirect is required for OAuth provider flow.
   window.location.assign(payload.authorizeUrl);
 }
 
@@ -111,11 +119,13 @@ export async function tryHandleTruecallerCallback() {
     throw new Error("Truecaller callback did not return a user");
   }
 
+  // Cleanup callback URL after login to keep route stable.
   window.history.replaceState({}, "", "/");
   return normalizeUser(payload.user, "truecaller");
 }
 
 export async function syncUser(user) {
+  // Best-effort user bootstrap in DB so progress endpoints have known user id.
   const response = await fetch(makeApiUrl("/api/users/upsert"), {
     method: "POST",
     headers: {

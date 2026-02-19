@@ -6,12 +6,14 @@ let dbPromise;
 
 function openDatabase() {
   if (!dbPromise) {
+    // Open once and cache the promise to avoid duplicate open calls.
     dbPromise = new Promise((resolve, reject) => {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
 
       request.onupgradeneeded = () => {
         const database = request.result;
 
+        // Single key-value store keeps local storage API simple.
         if (!database.objectStoreNames.contains(KV_STORE)) {
           database.createObjectStore(KV_STORE);
         }

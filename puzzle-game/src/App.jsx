@@ -1,123 +1,17 @@
+// Imports: app hooks, shared constants, UI sections, and presentational components.
 import { useMemo } from "react";
 import { useAuth } from "./auth/useAuth";
 import { useDailyPuzzle } from "./game/useDailyPuzzle";
 import { GRID_SIZE } from "../shared/dailyPuzzle";
 import { getClientSetupWarnings, isFirebaseConfigured } from "./lib/env";
-
-function StatusBadge({ status }) {
-  const className =
-    status === "healthy"
-      ? "bg-emerald-500/20 text-emerald-200"
-      : status === "degraded"
-      ? "bg-sky-500/20 text-sky-200"
-      : status === "offline"
-      ? "bg-amber-500/20 text-amber-200"
-      : "bg-slate-500/20 text-slate-200";
-
-  const label =
-    status === "healthy"
-      ? "Backend connected"
-      : status === "degraded"
-      ? "API online, DB not connected"
-      : status === "offline"
-      ? "Backend unavailable"
-      : "Backend not checked";
-
-  return (
-    <span className={`rounded-full px-3 py-1 text-xs font-medium ${className}`}>
-      {label}
-    </span>
-  );
-}
-
-function AuthError({ message, onClear }) {
-  if (!message) {
-    return null;
-  }
-
-  return (
-    <div className="rounded-xl border border-red-300/40 bg-red-500/10 p-3 text-sm text-red-100">
-      <div className="flex items-start justify-between gap-4">
-        <p>{message}</p>
-        <button
-          type="button"
-          className="rounded-md bg-white/10 px-2 py-1 text-xs hover:bg-white/20"
-          onClick={onClear}
-        >
-          Dismiss
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function formatDuration(seconds) {
-  const safe = Math.max(0, Number(seconds) || 0);
-  const minutes = Math.floor(safe / 60);
-  const remainder = safe % 60;
-  return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
-}
-
-function PuzzleGrid({ puzzle, grid, onUpdate }) {
-  if (!puzzle) {
-    return null;
-  }
-
-  return (
-    <div className="grid w-full max-w-md grid-cols-4 gap-2">
-      {grid.map((row, rowIndex) =>
-        row.map((cell, colIndex) => {
-          const isGiven = puzzle.givens[rowIndex][colIndex] !== null;
-          const value = cell === null ? "" : String(cell);
-
-          return (
-            <input
-              key={`${rowIndex}-${colIndex}`}
-              type="text"
-              inputMode="numeric"
-              maxLength={1}
-              value={value}
-              onChange={(event) => onUpdate(rowIndex, colIndex, event.target.value)}
-              disabled={isGiven}
-              className={`h-14 rounded-xl border text-center text-xl font-semibold outline-none transition ${
-                isGiven
-                  ? "cursor-not-allowed border-slate-600 bg-slate-800 text-slate-100"
-                  : "border-slate-500 bg-slate-900 text-cyan-200 focus:border-cyan-300"
-              }`}
-            />
-          );
-        })
-      )}
-    </div>
-  );
-}
-
-function ProgressHistory({ history }) {
-  if (!history.length) {
-    return (
-      <p className="text-sm text-slate-400">
-        No synced progress found yet. Use Save Progress after login.
-      </p>
-    );
-  }
-
-  return (
-    <div className="space-y-2">
-      {history.map((entry) => (
-        <div
-          key={`${entry.puzzleDate}-${entry.updatedAt || "no-time"}`}
-          className="flex items-center justify-between rounded-lg border border-white/10 bg-slate-900/50 px-3 py-2 text-xs"
-        >
-          <span>{entry.puzzleDate}</span>
-          <span className="uppercase tracking-wide text-slate-300">{entry.status}</span>
-          <span>Score {entry.score}</span>
-          <span>Hints {entry.hintsUsed}</span>
-          <span>Time {formatDuration(entry.elapsedSeconds || 0)}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
+import { formatDuration } from "./lib/formatters";
+import Heatmap from "./heatmap/Heatmap";
+import DailyUnlockPanel from "./unlock/DailyUnlockPanel";
+import { calculateCurrentStreak } from "./heatmap/heatmapLogic";
+import StatusBadge from "./components/StatusBadge";
+import AuthError from "./components/AuthError";
+import PuzzleGrid from "./components/PuzzleGrid";
+import ProgressHistory from "./components/ProgressHistory";
 
 export default function App() {
   const {
@@ -145,6 +39,9 @@ export default function App() {
     history,
     summary,
     cellStats,
+    activityEntries,
+    unsyncedActivityCount,
+    latestAchievement,
     updateCell,
     useHint,
     submitPuzzle,
@@ -162,20 +59,29 @@ export default function App() {
     return `Signed in with ${user.provider}. Daily puzzle sync is enabled.`;
   }, [user]);
 
+  const currentStreak = useMemo(() => calculateCurrentStreak(activityEntries), [activityEntries]);
+  const hintLimit = puzzle?.hintLimit ?? 0;
+  const hintLimitReached = hintLimit > 0 && hintsUsed >= hintLimit;
+  const puzzleLabel = puzzle?.puzzleTitle || "Daily Puzzle";
+
   return (
-    <main className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 px-4 py-10 text-slate-100">
-      <section className="mx-auto flex w-full max-w-3xl flex-col gap-6 rounded-3xl border border-white/10 bg-white/5 p-6 shadow-2xl backdrop-blur">
+    <main className="min-h-screen bg-gradient-to-b from-[#0c1a4b] via-[#181f58] to-[#0c1a4b] px-4 py-10 text-[#e8e6e6]">
+      <section className="mx-auto flex w-full max-w-3xl flex-col gap-6 rounded-3xl border border-[rgba(44,49,136,0.55)] bg-[rgba(12,26,75,0.74)] p-6 shadow-2xl backdrop-blur">
+        {/* Header: app branding + streak + backend status */}
         <header className="space-y-3">
-          <p className="text-xs uppercase tracking-[0.25em] text-slate-300">
+          <p className="text-xs uppercase tracking-[0.25em] text-[rgba(248,201,180,0.85)]">
             Capstone Project
           </p>
-          <h1 className="text-3xl font-bold sm:text-4xl">Daily Puzzle Logic Game</h1>
-          <p className="text-sm text-slate-300">{subtitle}</p>
+          <h1 className="text-3xl font-bold sm:text-4xl">Mini Sudoko Challenge Game</h1>
+          <p className="text-sm text-[rgba(232,230,230,0.88)]">{subtitle}</p>
+          <p className="inline-flex w-fit items-center gap-2 rounded-full border border-[rgba(235,91,44,0.6)] bg-[rgba(235,91,44,0.2)] px-3 py-1 text-xs font-semibold text-[#f8c9b4]">
+            Streak {currentStreak} day{currentStreak === 1 ? "" : "s"}
+          </p>
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={backendStatus} />
             <button
               type="button"
-              className="rounded-lg border border-white/20 px-3 py-1 text-xs hover:bg-white/10"
+              className="rounded-lg border border-[rgba(248,201,180,0.35)] px-3 py-1 text-xs text-[#e8e6e6] hover:bg-[rgba(248,201,180,0.14)]"
               onClick={checkBackendStatus}
               disabled={loading}
             >
@@ -187,18 +93,19 @@ export default function App() {
         <AuthError message={error} onClear={clearError} />
         <AuthError message={puzzleError} onClear={reloadPuzzle} />
         {setupWarnings.length ? (
-          <div className="rounded-xl border border-amber-300/30 bg-amber-500/10 p-3 text-xs text-amber-100">
+          <div className="rounded-xl border border-[rgba(235,91,44,0.48)] bg-[rgba(235,91,44,0.16)] p-3 text-xs text-[#f8c9b4]">
             {setupWarnings.map((warning) => (
               <p key={warning}>{warning}</p>
             ))}
           </div>
         ) : null}
 
+        {/* Auth panel: choose guest/google/truecaller or show signed-in user details */}
         {!user ? (
           <div className="grid gap-3 sm:grid-cols-3">
             <button
               type="button"
-              className="rounded-xl border border-emerald-300/30 bg-emerald-500/10 px-4 py-3 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/20 disabled:opacity-70"
+              className="rounded-xl border border-[rgba(235,91,44,0.65)] bg-[rgba(235,91,44,0.2)] px-4 py-3 text-sm font-semibold text-[#f8c9b4] transition hover:bg-[rgba(235,91,44,0.28)] disabled:opacity-70"
               onClick={signInAsGuest}
               disabled={loading}
             >
@@ -206,7 +113,7 @@ export default function App() {
             </button>
             <button
               type="button"
-              className="rounded-xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-white disabled:opacity-70"
+              className="rounded-xl bg-[#e8e6e6] px-4 py-3 text-sm font-semibold text-[#241f20] transition hover:bg-[#f8c9b4] disabled:opacity-70"
               onClick={signInWithGoogle}
               disabled={loading || !isFirebaseConfigured}
             >
@@ -218,7 +125,7 @@ export default function App() {
             </button>
             <button
               type="button"
-              className="rounded-xl border border-slate-300/30 bg-slate-800 px-4 py-3 text-sm font-semibold text-slate-100 transition hover:bg-slate-700 disabled:opacity-70"
+              className="rounded-xl border border-[rgba(44,49,136,0.75)] bg-[rgba(44,49,136,0.3)] px-4 py-3 text-sm font-semibold text-[#e8e6e6] transition hover:bg-[rgba(44,49,136,0.5)] disabled:opacity-70"
               onClick={signInWithTruecaller}
               disabled={loading}
             >
@@ -226,19 +133,21 @@ export default function App() {
             </button>
           </div>
         ) : (
-          <div className="space-y-4 rounded-2xl border border-white/10 bg-slate-900/60 p-4">
+          <div className="space-y-4 rounded-2xl border border-[rgba(44,49,136,0.55)] bg-[rgba(24,31,88,0.55)] p-4">
             <div>
-              <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Player</p>
+              <p className="text-xs uppercase tracking-[0.18em] text-[rgba(248,201,180,0.8)]">Player</p>
               <h2 className="mt-1 text-2xl font-semibold">{user.name || "Puzzle Player"}</h2>
-              <p className="text-sm text-slate-300">{user.email || user.phone || "No email available"}</p>
+              <p className="text-sm text-[rgba(232,230,230,0.86)]">
+                {user.email || user.phone || "No email available"}
+              </p>
             </div>
-            <div className="flex items-center justify-between text-sm text-slate-300">
+            <div className="flex items-center justify-between text-sm text-[rgba(232,230,230,0.88)]">
               <span>User ID: {user.id}</span>
               <span>Provider: {user.provider}</span>
             </div>
             <button
               type="button"
-              className="rounded-lg border border-white/20 px-3 py-2 text-sm hover:bg-white/10"
+              className="rounded-lg border border-[rgba(248,201,180,0.35)] px-3 py-2 text-sm text-[#f8c9b4] hover:bg-[rgba(235,91,44,0.2)]"
               onClick={signOut}
               disabled={loading}
             >
@@ -247,41 +156,45 @@ export default function App() {
           </div>
         )}
 
-        <section className="space-y-4 rounded-2xl border border-cyan-300/20 bg-slate-900/60 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+        {/* Puzzle panel: board, timer, hints, submit, reset, save */}
+        <section className="space-y-4 rounded-2xl border border-[rgba(44,49,136,0.78)] bg-[rgba(24,41,101,0.45)] p-4">
+          <div className="space-y-2">
             <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-cyan-300">Daily Puzzle</p>
-              <h3 className="text-lg font-semibold text-cyan-100">
-                Fill every row and column with numbers 1 to {GRID_SIZE}
+              <p className="text-xs uppercase tracking-[0.2em] text-[#f8c9b4]">Daily Puzzle</p>
+              <h3 className="text-lg font-semibold text-[#e8e6e6]">
+                {puzzleLabel}: fill every row and column with numbers 1 to {GRID_SIZE}
               </h3>
-            </div>
-            <div className="text-right text-xs text-slate-300">
-              <p>Date: {puzzle?.date || "-"}</p>
-              <p>Time: {formatDuration(elapsedSeconds)}</p>
-              <p>
-                Filled: {cellStats.filledEditable}/{cellStats.totalEditable}
-              </p>
             </div>
           </div>
 
           {puzzleLoading ? (
-            <p className="text-sm text-slate-300">Loading puzzle...</p>
+            <p className="text-sm text-[rgba(232,230,230,0.88)]">Loading puzzle...</p>
           ) : (
-            <PuzzleGrid puzzle={puzzle} grid={grid} onUpdate={updateCell} />
+            <div className="w-full max-w-md rounded-2xl border border-[rgba(44,49,136,0.65)] bg-[rgba(12,26,75,0.35)] p-3">
+              <div className="mb-3 grid grid-cols-2 gap-2 text-xs text-[rgba(232,230,230,0.9)] sm:grid-cols-4">
+                <p>Date: {puzzle?.date || "-"}</p>
+                <p>Type: {puzzle?.puzzleType || "-"}</p>
+                <p>Time: {formatDuration(elapsedSeconds)}</p>
+                <p>
+                  Filled: {cellStats.filledEditable}/{cellStats.totalEditable}
+                </p>
+              </div>
+              <PuzzleGrid puzzle={puzzle} grid={grid} onUpdate={updateCell} />
+            </div>
           )}
 
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              className="rounded-lg border border-cyan-300/30 px-3 py-2 text-sm text-cyan-100 hover:bg-cyan-500/10 disabled:opacity-60"
+              className="rounded-lg border border-[rgba(248,201,180,0.45)] px-3 py-2 text-sm text-[#f8c9b4] hover:bg-[rgba(248,201,180,0.14)] disabled:opacity-60"
               onClick={useHint}
-              disabled={puzzleLoading || submitting}
+              disabled={puzzleLoading || submitting || hintLimitReached}
             >
-              Use Hint ({hintsUsed})
+              Use Hint ({hintsUsed}/{hintLimit || 0})
             </button>
             <button
               type="button"
-              className="rounded-lg bg-cyan-300 px-3 py-2 text-sm font-semibold text-slate-900 hover:bg-cyan-200 disabled:opacity-60"
+              className="rounded-lg bg-[#eb5b2c] px-3 py-2 text-sm font-semibold text-[#e8e6e6] hover:bg-[#d14c20] disabled:opacity-60"
               onClick={submitPuzzle}
               disabled={puzzleLoading || submitting}
             >
@@ -289,7 +202,7 @@ export default function App() {
             </button>
             <button
               type="button"
-              className="rounded-lg border border-white/20 px-3 py-2 text-sm hover:bg-white/10 disabled:opacity-60"
+              className="rounded-lg border border-[rgba(232,230,230,0.35)] px-3 py-2 text-sm text-[#e8e6e6] hover:bg-[rgba(232,230,230,0.1)] disabled:opacity-60"
               onClick={resetPuzzle}
               disabled={puzzleLoading || submitting}
             >
@@ -297,7 +210,7 @@ export default function App() {
             </button>
             <button
               type="button"
-              className="rounded-lg border border-white/20 px-3 py-2 text-sm hover:bg-white/10 disabled:opacity-60"
+              className="rounded-lg border border-[rgba(232,230,230,0.35)] px-3 py-2 text-sm text-[#e8e6e6] hover:bg-[rgba(232,230,230,0.1)] disabled:opacity-60"
               onClick={reloadPuzzle}
               disabled={puzzleLoading || submitting}
             >
@@ -305,7 +218,7 @@ export default function App() {
             </button>
             <button
               type="button"
-              className="rounded-lg border border-emerald-300/30 px-3 py-2 text-sm text-emerald-100 hover:bg-emerald-500/10 disabled:opacity-60"
+              className="rounded-lg border border-[rgba(44,49,136,0.75)] px-3 py-2 text-sm text-[#e8e6e6] hover:bg-[rgba(44,49,136,0.3)] disabled:opacity-60"
               onClick={syncProgress}
               disabled={!user || syncing || puzzleLoading || submitting}
             >
@@ -317,8 +230,8 @@ export default function App() {
             <div
               className={`rounded-xl border p-3 text-sm ${
                 submitResult.solved
-                  ? "border-emerald-300/40 bg-emerald-500/10 text-emerald-100"
-                  : "border-amber-300/40 bg-amber-500/10 text-amber-100"
+                  ? "animate-completion border-[rgba(44,49,136,0.75)] bg-[rgba(44,49,136,0.32)] text-[#e8e6e6]"
+                  : "border-[rgba(235,91,44,0.56)] bg-[rgba(235,91,44,0.2)] text-[#f8c9b4]"
               }`}
             >
               <p>{submitResult.message}</p>
@@ -327,29 +240,42 @@ export default function App() {
               </p>
             </div>
           ) : null}
+
+          {latestAchievement ? (
+            <div className="animate-achievement rounded-xl border border-[rgba(235,91,44,0.58)] bg-[rgba(235,91,44,0.2)] p-3 text-sm text-[#f8c9b4]">
+              Achievement: {latestAchievement}
+            </div>
+          ) : null}
         </section>
 
-        <section className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-          <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-300">
+        {/* Synced summary + last saved attempts from backend */}
+        <section className="space-y-3 rounded-2xl border border-[rgba(44,49,136,0.52)] bg-[rgba(24,31,88,0.45)] p-4">
+          <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-[rgba(248,201,180,0.88)]">
             Synced Progress
           </h3>
-          <div className="grid gap-2 text-xs text-slate-300 sm:grid-cols-4">
-            <div className="rounded-lg border border-white/10 bg-slate-900/50 px-3 py-2">
+          <div className="grid gap-2 text-xs text-[rgba(232,230,230,0.9)] sm:grid-cols-4">
+            <div className="rounded-lg border border-[rgba(44,49,136,0.55)] bg-[rgba(12,26,75,0.5)] px-3 py-2">
               Completed: {summary.completedCount}
             </div>
-            <div className="rounded-lg border border-white/10 bg-slate-900/50 px-3 py-2">
+            <div className="rounded-lg border border-[rgba(44,49,136,0.55)] bg-[rgba(12,26,75,0.5)] px-3 py-2">
               Attempted: {summary.attemptedCount}
             </div>
-            <div className="rounded-lg border border-white/10 bg-slate-900/50 px-3 py-2">
+            <div className="rounded-lg border border-[rgba(44,49,136,0.55)] bg-[rgba(12,26,75,0.5)] px-3 py-2">
               Best Score: {summary.bestScore}
             </div>
-            <div className="rounded-lg border border-white/10 bg-slate-900/50 px-3 py-2">
+            <div className="rounded-lg border border-[rgba(44,49,136,0.55)] bg-[rgba(12,26,75,0.5)] px-3 py-2">
               Avg Time: {formatDuration(summary.averageTimeSeconds)}
             </div>
           </div>
           <ProgressHistory history={history} />
         </section>
+
+        {/* Retention view: year heatmap + unlock progression */}
+        <Heatmap activityEntries={activityEntries} unsyncedCount={unsyncedActivityCount} />
+
+        <DailyUnlockPanel todayDateKey={puzzle?.date || "-"} activityEntries={activityEntries} />
       </section>
     </main>
   );
 }
+

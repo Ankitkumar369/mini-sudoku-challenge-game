@@ -1,3 +1,4 @@
+// Imports: JSON helper and database connectivity utilities.
 import { json } from "./_lib/http.js";
 import { getSqlClient, isDatabaseConfigured } from "./_lib/neon.js";
 

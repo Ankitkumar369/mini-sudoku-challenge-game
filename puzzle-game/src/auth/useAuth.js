@@ -1,3 +1,4 @@
+// Imports: auth service actions and local session persistence helpers.
 import { useCallback, useEffect, useState } from "react";
 import {
   checkApiHealth,
@@ -25,6 +26,7 @@ export function useAuth() {
   const [backendStatus, setBackendStatus] = useState("idle");
 
   const initialize = useCallback(async () => {
+    // App startup flow: callback login first, then cached session fallback.
     setLoading(true);
 
     try {
@@ -54,6 +56,7 @@ export function useAuth() {
   }, [initialize]);
 
   const checkBackendStatus = useCallback(async () => {
+    // Health endpoint distinguishes API alive vs DB connected state.
     try {
       setBackendStatus("checking");
       const health = await checkApiHealth();

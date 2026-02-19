@@ -1,14 +1,20 @@
+// Imports: crypto nonce generator and shared request/response helpers.
 import { randomUUID } from "node:crypto";
 import { json, readJsonBody } from "../../_lib/http.js";
 
 const DEFAULT_AUTH_URL = "https://oauth.truecaller.com/v1/authorize";
+
+function readEnv(primaryKey, legacyKey = "") {
+  return process.env[primaryKey] || (legacyKey ? process.env[legacyKey] : "") || "";
+}
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return json(res, 405, { error: "Method not allowed" });
   }
 
-  const clientId = process.env.TRUECALLER_CLIENT_ID;
+  // Supports both correct key and common typo key for smoother migration.
+  const clientId = readEnv("TRUECALLER_CLIENT_ID", "TRUECALLLER_CLIENT_ID");
 
   if (!clientId) {
     return json(res, 500, { error: "TRUECALLER_CLIENT_ID is not set" });
@@ -16,7 +22,7 @@ export default async function handler(req, res) {
 
   const body = await readJsonBody(req);
   const redirectUri =
-    body.redirectUri || process.env.TRUECALLER_REDIRECT_URI || null;
+    body.redirectUri || readEnv("TRUECALLER_REDIRECT_URI", "TRUECALLLER_REDIRECT_URI") || null;
 
   if (!redirectUri) {
     return json(res, 400, {
@@ -33,7 +39,7 @@ export default async function handler(req, res) {
   authorizeUrl.searchParams.set("response_type", "code");
   authorizeUrl.searchParams.set(
     "scope",
-    process.env.TRUECALLER_SCOPE || "openid profile phone"
+    readEnv("TRUECALLER_SCOPE", "TRUECALLLER_SCOPE") || "openid profile phone"
   );
   authorizeUrl.searchParams.set(
     "state",

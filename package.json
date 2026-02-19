@@ -1,7 +1,8 @@
 {
-  "name": "capstone-project",
+  "name": "retention-puzzle-game",
   "private": true,
   "scripts": {
+    "postinstall": "npm --prefix puzzle-game install",
     "dev": "npm --prefix puzzle-game run dev",
     "build": "npm --prefix puzzle-game run build",
     "lint": "npm --prefix puzzle-game run lint",

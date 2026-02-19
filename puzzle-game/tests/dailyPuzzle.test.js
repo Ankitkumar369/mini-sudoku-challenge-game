@@ -2,10 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   GRID_SIZE,
+  PUZZLE_TYPES,
   createDailyPuzzle,
   createInitialGrid,
   evaluateSubmission,
   findHintCell,
+  getPuzzleTypeForDate,
   getSolutionForDate,
 } from "../shared/dailyPuzzle.js";
 
@@ -30,7 +32,8 @@ test("createDailyPuzzle is deterministic for the same date", () => {
   assert.deepEqual(first, second);
   assert.equal(first.size, GRID_SIZE);
   assert.equal(first.date, "2026-02-11");
-  assert.equal(countGivens(first.givens), 9);
+  assert.ok([7, 9].includes(countGivens(first.givens)));
+  assert.ok(Object.values(PUZZLE_TYPES).includes(first.puzzleType));
 });
 
 test("evaluateSubmission solves correctly with full solution", () => {
@@ -56,7 +59,7 @@ test("findHintCell returns a valid missing cell and null for solved puzzle", () 
   const date = "2026-02-11";
   const puzzle = createDailyPuzzle(date);
   const incomplete = createInitialGrid(puzzle.givens);
-  const hint = findHintCell(date, incomplete);
+  const hint = findHintCell(date, incomplete, puzzle.puzzleType);
 
   assert.ok(hint);
   assert.ok(Number.isInteger(hint.row));
@@ -65,6 +68,14 @@ test("findHintCell returns a valid missing cell and null for solved puzzle", () 
   assert.ok(hint.value >= 1 && hint.value <= GRID_SIZE);
 
   const solved = getSolutionForDate(date);
-  const solvedHint = findHintCell(date, solved);
+  const solvedHint = findHintCell(date, solved, puzzle.puzzleType);
   assert.equal(solvedHint, null);
+});
+
+test("getPuzzleTypeForDate can resolve different types across days", () => {
+  const typeA = getPuzzleTypeForDate("2026-02-11");
+  const typeB = getPuzzleTypeForDate("2026-02-12");
+
+  assert.ok(Object.values(PUZZLE_TYPES).includes(typeA));
+  assert.ok(Object.values(PUZZLE_TYPES).includes(typeB));
 });

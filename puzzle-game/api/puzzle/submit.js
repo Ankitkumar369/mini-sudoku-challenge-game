@@ -1,34 +1,11 @@
+// Imports: HTTP helpers, DB utilities, validators, and shared puzzle evaluator.
 import { json, readJsonBody } from "../_lib/http.js";
 import { getSqlClient, isDatabaseConfigured } from "../_lib/neon.js";
 import { upsertPuzzleProgress } from "../_lib/puzzleProgress.js";
-import { PUZZLE_TYPE, evaluateSubmission, getTodayDateKey } from "../../shared/dailyPuzzle.js";
+import { normalizeOptionalDateKey, toNonNegativeInteger } from "../_lib/validation.js";
+import { evaluateSubmission, getTodayDateKey } from "../../shared/dailyPuzzle.js";
 
-function toNonNegativeInteger(value) {
-  const number = Number(value);
-
-  if (!Number.isFinite(number)) {
-    return 0;
-  }
-
-  return Math.max(0, Math.floor(number));
-}
-
-function normalizeDateKey(value) {
-  const candidate = String(value || "").trim();
-
-  if (!candidate) {
-    return null;
-  }
-
-  const parsed = new Date(candidate);
-
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-
-  return parsed.toISOString().slice(0, 10);
-}
-
+// Same scoring formula is used for local fallback and API result.
 function calculateScore({ solved, hintsUsed, elapsedSeconds }) {
   if (!solved) {
     return 0;
@@ -39,56 +16,117 @@ function calculateScore({ solved, hintsUsed, elapsedSeconds }) {
   return Math.max(10, 100 - hintPenalty - timePenalty);
 }
 
+function isValidElapsedSeconds(value) {
+  return value >= 0 && value <= 6 * 60 * 60;
+}
+
+function isValidHints(value) {
+  return value >= 0 && value <= 10;
+}
+
+function parseSubmitPayload(body) {
+  // puzzleDate is optional; invalid custom value should be rejected explicitly.
+  const parsedDate = normalizeOptionalDateKey(body.puzzleDate);
+  const hasPuzzleDate = Boolean(body.puzzleDate);
+  const userId = body.userId ? String(body.userId).trim() : "";
+  const puzzleType = body.puzzleType ? String(body.puzzleType).trim() : "";
+
+  return {
+    hasPuzzleDate,
+    puzzleDate: parsedDate || getTodayDateKey(),
+    parsedDate,
+    userId,
+    puzzleType,
+    hintsUsed: toNonNegativeInteger(body.hintsUsed),
+    elapsedSeconds: toNonNegativeInteger(body.elapsedSeconds),
+    answers: body.answers,
+  };
+}
+
+function validateSubmitPayload(payload) {
+  if (payload.hasPuzzleDate && !payload.parsedDate) {
+    return "Invalid puzzleDate";
+  }
+
+  if (!isValidElapsedSeconds(payload.elapsedSeconds)) {
+    return "elapsedSeconds out of range";
+  }
+
+  if (!isValidHints(payload.hintsUsed)) {
+    return "hintsUsed out of range";
+  }
+
+  return "";
+}
+
+async function persistSolvedProgress(payload, evaluation, score) {
+  // Persist only solved attempts; failed tries stay client-side to reduce DB writes.
+  if (!evaluation.solved || !payload.userId || !isDatabaseConfigured()) {
+    return false;
+  }
+
+  const sql = getSqlClient();
+  await upsertPuzzleProgress(sql, {
+    userId: payload.userId,
+    puzzleDate: evaluation.puzzle.date,
+    puzzleType: evaluation.puzzle.puzzleType,
+    status: "completed",
+    score,
+    hintsUsed: payload.hintsUsed,
+    elapsedSeconds: payload.elapsedSeconds,
+  });
+
+  return true;
+}
+
+function createSubmitResponse(evaluation, score, persisted) {
+  return {
+    ok: true,
+    solved: evaluation.solved,
+    score,
+    correctCells: evaluation.correctEditableCells,
+    totalCells: evaluation.totalEditableCells,
+    puzzleDate: evaluation.puzzle.date,
+    puzzleType: evaluation.puzzle.puzzleType,
+    persisted,
+  };
+}
+
+async function handleSubmit(body) {
+  const payload = parseSubmitPayload(body);
+  const validationError = validateSubmitPayload(payload);
+
+  if (validationError) {
+    return {
+      statusCode: 400,
+      response: { ok: false, error: validationError },
+    };
+  }
+
+  const evaluation = evaluateSubmission(payload.puzzleDate, payload.answers, payload.puzzleType);
+  const score = calculateScore({
+    solved: evaluation.solved,
+    hintsUsed: payload.hintsUsed,
+    elapsedSeconds: payload.elapsedSeconds,
+  });
+  const persisted = await persistSolvedProgress(payload, evaluation, score);
+
+  return {
+    statusCode: 200,
+    response: createSubmitResponse(evaluation, score, persisted),
+  };
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return json(res, 405, { error: "Method not allowed" });
   }
 
   try {
+    // Parse request body and return unified response shape.
     const body = await readJsonBody(req);
-    const hasPuzzleDate = Boolean(body.puzzleDate);
-    const puzzleDate = normalizeDateKey(body.puzzleDate) || getTodayDateKey();
-    const userId = body.userId ? String(body.userId).trim() : "";
-    const hintsUsed = toNonNegativeInteger(body.hintsUsed);
-    const elapsedSeconds = toNonNegativeInteger(body.elapsedSeconds);
-
-    if (hasPuzzleDate && !normalizeDateKey(body.puzzleDate)) {
-      return json(res, 400, { ok: false, error: "Invalid puzzleDate" });
-    }
-
-    const evaluation = evaluateSubmission(puzzleDate, body.answers);
-    const score = calculateScore({
-      solved: evaluation.solved,
-      hintsUsed,
-      elapsedSeconds,
-    });
-
-    let persisted = false;
-
-    if (userId && isDatabaseConfigured()) {
-      const sql = getSqlClient();
-      await upsertPuzzleProgress(sql, {
-        userId,
-        puzzleDate: evaluation.puzzle.date,
-        puzzleType: PUZZLE_TYPE,
-        status: evaluation.solved ? "completed" : "attempted",
-        score,
-        hintsUsed,
-        elapsedSeconds,
-      });
-      persisted = true;
-    }
-
-    return json(res, 200, {
-      ok: true,
-      solved: evaluation.solved,
-      score,
-      correctCells: evaluation.correctEditableCells,
-      totalCells: evaluation.totalEditableCells,
-      puzzleDate: evaluation.puzzle.date,
-      puzzleType: PUZZLE_TYPE,
-      persisted,
-    });
+    const result = await handleSubmit(body);
+    return json(res, result.statusCode, result.response);
   } catch (error) {
     return json(res, 500, {
       ok: false,

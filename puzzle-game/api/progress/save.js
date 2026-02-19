@@ -1,33 +1,9 @@
+// Imports: HTTP/DB helpers, input normalization, and puzzle type resolver.
 import { json, readJsonBody } from "../_lib/http.js";
 import { getSqlClient, isDatabaseConfigured } from "../_lib/neon.js";
 import { upsertPuzzleProgress } from "../_lib/puzzleProgress.js";
-import { PUZZLE_TYPE, getTodayDateKey } from "../../shared/dailyPuzzle.js";
-
-function toNonNegativeInteger(value) {
-  const number = Number(value);
-
-  if (!Number.isFinite(number)) {
-    return 0;
-  }
-
-  return Math.max(0, Math.floor(number));
-}
-
-function normalizeDateKey(value) {
-  const candidate = String(value || "").trim();
-
-  if (!candidate) {
-    return null;
-  }
-
-  const parsed = new Date(candidate);
-
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-
-  return parsed.toISOString().slice(0, 10);
-}
+import { normalizeOptionalDateKey, toNonNegativeInteger } from "../_lib/validation.js";
+import { getPuzzleTypeForDate, getTodayDateKey } from "../../shared/dailyPuzzle.js";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -43,26 +19,31 @@ export default async function handler(req, res) {
     }
 
     if (!isDatabaseConfigured()) {
+      // Frontend still stores progress locally; this flag informs UI.
       return json(res, 200, { ok: true, persisted: false });
     }
 
     const hasPuzzleDate = Boolean(body.puzzleDate);
-    const puzzleDate = normalizeDateKey(body.puzzleDate) || getTodayDateKey();
+    const normalizedPuzzleDate = normalizeOptionalDateKey(body.puzzleDate);
+    const puzzleDate = normalizedPuzzleDate || getTodayDateKey();
     const elapsedSeconds = toNonNegativeInteger(body.elapsedSeconds);
     const status = body.status ? String(body.status) : "in_progress";
     const score = toNonNegativeInteger(body.score);
     const hintsUsed = toNonNegativeInteger(body.hintsUsed);
+    const requestedPuzzleType = body.puzzleType ? String(body.puzzleType).trim() : "";
+    const puzzleType = requestedPuzzleType || getPuzzleTypeForDate(puzzleDate);
 
-    if (hasPuzzleDate && !normalizeDateKey(body.puzzleDate)) {
+    if (hasPuzzleDate && !normalizedPuzzleDate) {
       return json(res, 400, { ok: false, error: "Invalid puzzleDate" });
     }
 
     const sql = getSqlClient();
 
+    // Upsert keeps one snapshot per user/date/type.
     await upsertPuzzleProgress(sql, {
       userId,
       puzzleDate,
-      puzzleType: PUZZLE_TYPE,
+      puzzleType,
       status,
       score,
       hintsUsed,

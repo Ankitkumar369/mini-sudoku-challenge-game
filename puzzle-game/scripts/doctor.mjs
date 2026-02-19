@@ -38,18 +38,24 @@ const requiredForGoogle = [
 
 const requiredForDatabase = ["DATABASE_URL"];
 const requiredForTruecaller = [
-  "TRUECALLER_CLIENT_ID",
-  "TRUECALLER_CLIENT_SECRET",
-  "TRUECALLER_REDIRECT_URI",
+  ["TRUECALLER_CLIENT_ID", "TRUECALLLER_CLIENT_ID"],
+  ["TRUECALLER_CLIENT_SECRET", "TRUECALLLER_CLIENT_SECRET"],
+  ["TRUECALLER_REDIRECT_URI", "TRUECALLLER_REDIRECT_URI"],
 ];
 
 function missing(keys) {
   return keys.filter((key) => !entries[key]);
 }
 
+function missingTruecallerKeys(groups) {
+  return groups
+    .filter((group) => !group.some((key) => entries[key]))
+    .map((group) => group[0]);
+}
+
 const missingGoogle = missing(requiredForGoogle);
 const missingDatabase = missing(requiredForDatabase);
-const missingTruecaller = missing(requiredForTruecaller);
+const missingTruecaller = missingTruecallerKeys(requiredForTruecaller);
 
 console.log("Environment doctor report:");
 console.log(`- Google auth: ${missingGoogle.length ? "not ready" : "ready"}`);
@@ -68,6 +74,8 @@ if (missingTruecaller.length) {
   console.log(`  Missing Truecaller keys: ${missingTruecaller.join(", ")}`);
 }
 
-if (missingGoogle.length || missingDatabase.length || missingTruecaller.length) {
+// Fail only when core client auth keys are missing.
+// Database and Truecaller are optional for local/offline demo mode.
+if (missingGoogle.length) {
   process.exit(1);
 }

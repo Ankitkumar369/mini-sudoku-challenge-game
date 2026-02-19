@@ -1,5 +1,7 @@
+// Imports: shared puzzle type constant for DB row defaults.
 import { PUZZLE_TYPE } from "../../shared/dailyPuzzle.js";
 
+// Base user table used by progress rows (kept minimal for auth-provider flexibility).
 const CREATE_USERS_TABLE_SQL = `
   create table if not exists app_users (
     id text primary key,
@@ -11,6 +13,7 @@ const CREATE_USERS_TABLE_SQL = `
   );
 `;
 
+// Main progress table: one row per user + date + puzzle type.
 const CREATE_PROGRESS_TABLE_SQL = `
   create table if not exists puzzle_progress (
     user_id text not null references app_users(id) on delete cascade,
@@ -25,12 +28,14 @@ const CREATE_PROGRESS_TABLE_SQL = `
   );
 `;
 
+// Safe migration for existing deployments.
 const ALTER_PROGRESS_TABLE_SQL = `
   alter table puzzle_progress
   add column if not exists elapsed_seconds integer not null default 0;
 `;
 
 export async function ensurePuzzleProgressTable(sql) {
+  // Idempotent DDL calls: safe to run on every request before writes.
   await sql(CREATE_USERS_TABLE_SQL);
   await sql(CREATE_PROGRESS_TABLE_SQL);
   await sql(ALTER_PROGRESS_TABLE_SQL);
@@ -41,6 +46,7 @@ export async function ensureUserExists(sql, userId) {
     return;
   }
 
+  // Upsert user heartbeat so progress rows always have a valid FK.
   await sql(CREATE_USERS_TABLE_SQL);
   await sql`
     insert into app_users (id, provider, last_seen_at)
@@ -51,9 +57,11 @@ export async function ensureUserExists(sql, userId) {
 }
 
 export async function upsertPuzzleProgress(sql, entry) {
+  // Ensure schema + FK parent before inserting progress.
   await ensurePuzzleProgressTable(sql);
   await ensureUserExists(sql, entry.userId);
 
+  // Upsert keeps latest progress for same day/type, avoiding duplicate writes.
   await sql`
     insert into puzzle_progress (
       user_id,

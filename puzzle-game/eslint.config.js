@@ -25,6 +25,7 @@ export default defineConfig([
     },
     rules: {
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      'no-console': 'error',
     },
   },
   {
@@ -37,6 +38,9 @@ export default defineConfig([
         ecmaVersion: 'latest',
         sourceType: 'module',
       },
+    },
+    rules: {
+      'no-console': 'error',
     },
   },
   {

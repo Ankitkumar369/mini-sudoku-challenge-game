@@ -1,7 +1,7 @@
+// Imports: response helper and progress-table DB utilities.
 import { json } from "../_lib/http.js";
 import { getSqlClient, isDatabaseConfigured } from "../_lib/neon.js";
 import { ensurePuzzleProgressTable } from "../_lib/puzzleProgress.js";
-import { PUZZLE_TYPE } from "../../shared/dailyPuzzle.js";
 
 function toDateKey(value) {
   if (!value) {
@@ -24,18 +24,19 @@ export default async function handler(req, res) {
   }
 
   if (!isDatabaseConfigured()) {
+    // Read endpoint stays functional even without DB (offline/demo-safe mode).
     return json(res, 200, { ok: true, persisted: false, history: [] });
   }
 
   try {
     const sql = getSqlClient();
+    // Ensure table exists before querying in fresh deployment.
     await ensurePuzzleProgressTable(sql);
 
     const rows = await sql`
       select user_id, puzzle_date, puzzle_type, status, score, hints_used, elapsed_seconds, updated_at
       from puzzle_progress
       where user_id = ${userId}
-        and puzzle_type = ${PUZZLE_TYPE}
       order by puzzle_date desc
       limit 14;
     `;

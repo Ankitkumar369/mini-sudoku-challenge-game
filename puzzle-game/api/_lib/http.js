@@ -1,3 +1,4 @@
+// Consistent JSON response helper used by all API handlers.
 export function json(res, statusCode, payload) {
   res.status(statusCode);
   res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -5,10 +6,12 @@ export function json(res, statusCode, payload) {
 }
 
 export async function readJsonBody(req) {
+  // Vercel can pre-parse body for JSON requests.
   if (req.body && typeof req.body === "object") {
     return req.body;
   }
 
+  // Some runtimes provide string body only.
   if (typeof req.body === "string") {
     try {
       return JSON.parse(req.body);
@@ -21,6 +24,7 @@ export async function readJsonBody(req) {
     return {};
   }
 
+  // Manual stream parsing fallback for raw Node incoming requests.
   return new Promise((resolve, reject) => {
     let data = "";
 

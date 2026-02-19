@@ -1,9 +1,14 @@
+// Imports: gameplay state dependencies, local storage helpers, and API adapters.
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { env } from "../lib/env";
 import {
   clearPuzzleProgress,
+  getDailyActivityEntries,
   getPuzzleProgress,
+  getUnsyncedDailyActivityEntries,
+  markDailyActivityEntriesSynced,
   setPuzzleProgress,
+  unlockAchievement,
+  upsertDailyActivityEntry,
 } from "../lib/localProgress";
 import {
   GRID_SIZE,
@@ -12,100 +17,25 @@ import {
   evaluateSubmission,
   findHintCell,
 } from "../../shared/dailyPuzzle";
+import { calculateCurrentStreak } from "../heatmap/heatmapLogic";
+import {
+  calculateElapsedSeconds,
+  calculateScore,
+  deriveDifficultyLevel,
+  isOnline,
+  normalizeCellValue,
+  sanitizeGridFromProgress,
+  toErrorMessage,
+} from "./puzzleHelpers";
+import {
+  fetchTodayPuzzle,
+  loadHistoryFromApi,
+  saveProgressToApi,
+  submitPuzzleToApi,
+  syncDailyScoresToApi,
+} from "./puzzleApi";
 
-function makeApiUrl(path) {
-  const base = env.apiBaseUrl || "";
-  return `${base}${path}`;
-}
-
-async function parseJsonResponse(response) {
-  const payload = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(payload.error || "Request failed");
-  }
-
-  return payload;
-}
-
-function normalizeCellValue(value) {
-  const number = Number(value);
-  return Number.isInteger(number) && number >= 1 && number <= GRID_SIZE ? number : null;
-}
-
-function sanitizeGridFromProgress(givens, rawGrid) {
-  const initial = createInitialGrid(givens);
-
-  for (let row = 0; row < GRID_SIZE; row += 1) {
-    for (let col = 0; col < GRID_SIZE; col += 1) {
-      if (givens[row][col] !== null) {
-        initial[row][col] = givens[row][col];
-      } else {
-        initial[row][col] = normalizeCellValue(rawGrid?.[row]?.[col]);
-      }
-    }
-  }
-
-  return initial;
-}
-
-function calculateScore(solved, hintsUsed, elapsedSeconds) {
-  if (!solved) {
-    return 0;
-  }
-
-  const hintPenalty = hintsUsed * 10;
-  const timePenalty = Math.floor(elapsedSeconds / 20);
-  return Math.max(10, 100 - hintPenalty - timePenalty);
-}
-
-async function fetchTodayPuzzle() {
-  const response = await fetch(makeApiUrl("/api/puzzle/today"), { method: "GET" });
-  const payload = await parseJsonResponse(response);
-
-  if (!payload.puzzle) {
-    throw new Error("Puzzle payload is missing");
-  }
-
-  return payload.puzzle;
-}
-
-async function submitPuzzleToApi(body) {
-  const response = await fetch(makeApiUrl("/api/puzzle/submit"), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-
-  return parseJsonResponse(response);
-}
-
-async function saveProgressToApi(body) {
-  const response = await fetch(makeApiUrl("/api/progress/save"), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-
-  return parseJsonResponse(response);
-}
-
-async function loadHistoryFromApi(userId) {
-  const params = new URLSearchParams({ userId });
-  const response = await fetch(makeApiUrl(`/api/progress?${params.toString()}`), {
-    method: "GET",
-  });
-  const payload = await parseJsonResponse(response);
-  return Array.isArray(payload.history) ? payload.history : [];
-}
-
-function toErrorMessage(error) {
-  return error instanceof Error ? error.message : "Unexpected puzzle error";
-}
+const SYNC_BATCH_SIZE = 5;
 
 export function useDailyPuzzle(user) {
   const [loading, setLoading] = useState(true);
@@ -114,26 +44,125 @@ export function useDailyPuzzle(user) {
   const [puzzle, setPuzzle] = useState(null);
   const [grid, setGrid] = useState([]);
   const [hintsUsed, setHintsUsed] = useState(0);
-  const [startedAt, setStartedAt] = useState(Date.now());
+  const [startedAt, setStartedAt] = useState(null);
   const [error, setError] = useState("");
   const [submitResult, setSubmitResult] = useState(null);
   const [history, setHistory] = useState([]);
+  const [activityEntries, setActivityEntries] = useState([]);
+  const [latestAchievement, setLatestAchievement] = useState("");
+  const [completedElapsedSeconds, setCompletedElapsedSeconds] = useState(null);
   const [nowMs, setNowMs] = useState(Date.now());
+
+  // Reads latest activity list from IndexedDB for heatmap + streak UI.
+  const refreshActivityEntries = useCallback(async () => {
+    try {
+      const entries = await getDailyActivityEntries();
+      setActivityEntries(entries);
+    } catch {
+      setActivityEntries([]);
+    }
+  }, []);
 
   const persistLocalState = useCallback(async (nextState) => {
     if (!nextState?.puzzleDate) {
       return;
     }
 
+    // Save a resumable snapshot for offline-first behavior.
     await setPuzzleProgress(nextState.puzzleDate, {
       grid: nextState.grid,
       hintsUsed: nextState.hintsUsed,
-      startedAt: nextState.startedAt,
+      startedAt: nextState.startedAt || null,
+      elapsedSeconds: Number.isFinite(nextState.elapsedSeconds) ? nextState.elapsedSeconds : 0,
       status: nextState.status,
       score: nextState.score || 0,
       updatedAt: Date.now(),
     });
   }, []);
+
+  const maybeUnlockAchievements = useCallback(async (entries) => {
+    const solvedEntries = entries.filter((entry) => entry.solved);
+    const solvedCount = solvedEntries.length;
+    const streak = calculateCurrentStreak(entries);
+    const unlocked = [];
+
+    if (streak >= 7 && (await unlockAchievement("streak_7", { streak: 7 }))) {
+      unlocked.push("7-day streak unlocked");
+    }
+
+    if (streak >= 30 && (await unlockAchievement("streak_30", { streak: 30 }))) {
+      unlocked.push("30-day streak unlocked");
+    }
+
+    if (solvedCount >= 100 && (await unlockAchievement("solved_100", { solvedCount: 100 }))) {
+      unlocked.push("100 completions unlocked");
+    }
+
+    if (unlocked.length > 0) {
+      setLatestAchievement(unlocked[0]);
+    }
+  }, []);
+
+  const syncDailyActivity = useCallback(
+    async ({ force = false } = {}) => {
+      // Sync runs only for logged-in users and only when online.
+      if (!user?.id || !isOnline()) {
+        return { synced: 0, attempted: 0 };
+      }
+
+      const batchLimit = force ? 365 : SYNC_BATCH_SIZE;
+      const entries = await getUnsyncedDailyActivityEntries(batchLimit);
+
+      if (entries.length === 0) {
+        return { synced: 0, attempted: 0 };
+      }
+
+      if (!force && entries.length < SYNC_BATCH_SIZE) {
+        // Batch small updates to reduce server writes as per project guideline.
+        return { synced: 0, attempted: entries.length };
+      }
+
+      const payloadEntries = entries.map((entry) => ({
+        date: entry.date,
+        score: entry.score,
+        timeTaken: entry.timeTaken,
+        solved: entry.solved,
+      }));
+
+      const payload = await syncDailyScoresToApi({
+        userId: user.id,
+        entries: payloadEntries,
+      });
+
+      if (payload.ok) {
+        await markDailyActivityEntriesSynced(payloadEntries.map((entry) => entry.date));
+        await refreshActivityEntries();
+      }
+
+      return {
+        synced: payload.ok ? payloadEntries.length : 0,
+        attempted: payloadEntries.length,
+      };
+    },
+    [refreshActivityEntries, user?.id]
+  );
+
+  const recordDailyActivity = useCallback(
+    async ({ date, solved, score, timeTaken, difficulty }) => {
+      // Unsynced flag is kept true until backend confirms batch sync.
+      await upsertDailyActivityEntry(date, {
+        date,
+        solved,
+        score,
+        timeTaken,
+        difficulty,
+        synced: !solved || !user?.id || !isOnline(),
+      });
+
+      await refreshActivityEntries();
+    },
+    [refreshActivityEntries, user?.id]
+  );
 
   const loadPuzzle = useCallback(async () => {
     setLoading(true);
@@ -144,22 +173,34 @@ export function useDailyPuzzle(user) {
       let nextPuzzle;
 
       try {
+        // Primary source is API so timezone/date rules remain consistent.
         nextPuzzle = await fetchTodayPuzzle();
       } catch {
+        // Offline fallback uses deterministic local puzzle generation.
         nextPuzzle = createDailyPuzzle();
       }
 
       const cached = await getPuzzleProgress(nextPuzzle.date);
       const nextGrid = sanitizeGridFromProgress(nextPuzzle.givens, cached?.grid);
       const nextHintsUsed = Number(cached?.hintsUsed) || 0;
-      const nextStartedAt = Number(cached?.startedAt) || Date.now();
+      const cachedStartedAt = Number(cached?.startedAt);
+      const nextStartedAt = Number.isFinite(cachedStartedAt) && cachedStartedAt > 0 ? cachedStartedAt : null;
+      const cachedElapsedSeconds = Number(cached?.elapsedSeconds);
+      const nextCompletedElapsedSeconds =
+        cached?.status === "completed" &&
+        Number.isFinite(cachedElapsedSeconds) &&
+        cachedElapsedSeconds >= 0
+          ? Math.floor(cachedElapsedSeconds)
+          : null;
 
       setPuzzle(nextPuzzle);
       setGrid(nextGrid);
       setHintsUsed(nextHintsUsed);
       setStartedAt(nextStartedAt);
+      setCompletedElapsedSeconds(nextCompletedElapsedSeconds);
 
       if (cached?.status === "completed") {
+        // On reload, keep solved state visible instead of resetting session.
         setSubmitResult({
           solved: true,
           score: Number(cached.score) || 0,
@@ -175,8 +216,10 @@ export function useDailyPuzzle(user) {
   }, []);
 
   useEffect(() => {
+    // Initial load: puzzle + local activity cache.
     loadPuzzle();
-  }, [loadPuzzle]);
+    refreshActivityEntries();
+  }, [loadPuzzle, refreshActivityEntries]);
 
   useEffect(() => {
     if (!user?.id) {
@@ -204,6 +247,7 @@ export function useDailyPuzzle(user) {
   }, [user?.id]);
 
   useEffect(() => {
+    // Lightweight timer tick used for elapsed-time display only.
     const timer = setInterval(() => {
       setNowMs(Date.now());
     }, 1000);
@@ -212,6 +256,27 @@ export function useDailyPuzzle(user) {
       clearInterval(timer);
     };
   }, []);
+
+  useEffect(() => {
+    if (!user?.id || typeof window === "undefined") {
+      return;
+    }
+
+    const handleOnline = () => {
+      // Auto-sync queued activity when network comes back.
+      syncDailyActivity({ force: false }).catch(() => {});
+    };
+
+    window.addEventListener("online", handleOnline);
+
+    if (isOnline()) {
+      handleOnline();
+    }
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+    };
+  }, [syncDailyActivity, user?.id]);
 
   const cellStats = useMemo(() => {
     if (!puzzle) {
@@ -236,8 +301,16 @@ export function useDailyPuzzle(user) {
   }, [puzzle, grid]);
 
   const elapsedSeconds = useMemo(() => {
-    return Math.max(0, Math.floor((nowMs - startedAt) / 1000));
-  }, [nowMs, startedAt]);
+    if (completedElapsedSeconds !== null) {
+      return completedElapsedSeconds;
+    }
+
+    return calculateElapsedSeconds(startedAt, nowMs);
+  }, [completedElapsedSeconds, nowMs, startedAt]);
+
+  const unsyncedActivityCount = useMemo(() => {
+    return activityEntries.filter((entry) => entry.solved && !entry.synced).length;
+  }, [activityEntries]);
 
   const updateCell = useCallback(
     async (row, col, value) => {
@@ -246,6 +319,7 @@ export function useDailyPuzzle(user) {
       }
 
       const normalized = normalizeCellValue(value);
+      const interactionStartedAt = startedAt || Date.now();
       const nextGrid = grid.map((gridRow, rowIndex) =>
         gridRow.map((cell, colIndex) => {
           if (rowIndex === row && colIndex === col) {
@@ -256,6 +330,9 @@ export function useDailyPuzzle(user) {
         })
       );
 
+      if (!startedAt) {
+        setStartedAt(interactionStartedAt);
+      }
       setGrid(nextGrid);
       setSubmitResult(null);
 
@@ -263,7 +340,8 @@ export function useDailyPuzzle(user) {
         puzzleDate: puzzle.date,
         grid: nextGrid,
         hintsUsed,
-        startedAt,
+        startedAt: interactionStartedAt,
+        elapsedSeconds: calculateElapsedSeconds(interactionStartedAt, Date.now()),
         status: "in_progress",
       }).catch(() => {});
     },
@@ -275,9 +353,20 @@ export function useDailyPuzzle(user) {
       return;
     }
 
-    const hint = findHintCell(puzzle.date, grid);
+    if (hintsUsed >= (puzzle.hintLimit || 0)) {
+      setSubmitResult({
+        solved: false,
+        score: 0,
+        message: `Hint limit reached (${puzzle.hintLimit || 0} per day).`,
+        persisted: false,
+      });
+      return;
+    }
+
+    const hint = findHintCell(puzzle.date, grid, puzzle.puzzleType);
 
     if (!hint) {
+      // If no missing cell found, puzzle is already effectively solved.
       setSubmitResult({
         solved: true,
         score: calculateScore(true, hintsUsed, elapsedSeconds),
@@ -298,6 +387,10 @@ export function useDailyPuzzle(user) {
     );
 
     const nextHintsUsed = hintsUsed + 1;
+    const interactionStartedAt = startedAt || Date.now();
+    if (!startedAt) {
+      setStartedAt(interactionStartedAt);
+    }
     setGrid(nextGrid);
     setHintsUsed(nextHintsUsed);
     setSubmitResult(null);
@@ -306,7 +399,8 @@ export function useDailyPuzzle(user) {
       puzzleDate: puzzle.date,
       grid: nextGrid,
       hintsUsed: nextHintsUsed,
-      startedAt,
+      startedAt: interactionStartedAt,
+      elapsedSeconds: calculateElapsedSeconds(interactionStartedAt, Date.now()),
       status: "in_progress",
     }).catch(() => {});
   }, [elapsedSeconds, grid, hintsUsed, persistLocalState, puzzle, startedAt]);
@@ -319,7 +413,8 @@ export function useDailyPuzzle(user) {
     const initialGrid = createInitialGrid(puzzle.givens);
     setGrid(initialGrid);
     setHintsUsed(0);
-    setStartedAt(Date.now());
+    setStartedAt(null);
+    setCompletedElapsedSeconds(null);
     setSubmitResult(null);
 
     await clearPuzzleProgress(puzzle.date).catch(() => {});
@@ -333,21 +428,24 @@ export function useDailyPuzzle(user) {
     setSubmitting(true);
     setError("");
 
-    const liveElapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    const liveElapsedSeconds = calculateElapsedSeconds(startedAt, Date.now());
 
     try {
       let payload;
 
       try {
+        // Preferred path: server validates score and can persist completion.
         payload = await submitPuzzleToApi({
           userId: user?.id || "",
           puzzleDate: puzzle.date,
+          puzzleType: puzzle.puzzleType,
           answers: grid,
           hintsUsed,
           elapsedSeconds: liveElapsedSeconds,
         });
       } catch {
-        const localResult = evaluateSubmission(puzzle.date, grid);
+        // Offline/local fallback keeps gameplay uninterrupted.
+        const localResult = evaluateSubmission(puzzle.date, grid, puzzle.puzzleType);
         payload = {
           solved: localResult.solved,
           score: calculateScore(localResult.solved, hintsUsed, liveElapsedSeconds),
@@ -359,25 +457,44 @@ export function useDailyPuzzle(user) {
 
       const solved = Boolean(payload.solved);
       const nextStatus = solved ? "completed" : "attempted";
+      const score = Number(payload.score) || 0;
       const message = solved
-        ? `Solved. Score ${payload.score}.`
+        ? `Solved. Score ${score}.`
         : `Not solved yet (${payload.correctCells}/${payload.totalCells} correct editable cells).`;
 
       setSubmitResult({
         solved,
-        score: payload.score || 0,
+        score,
         message,
         persisted: Boolean(payload.persisted),
       });
+      setCompletedElapsedSeconds(solved ? liveElapsedSeconds : null);
 
       await persistLocalState({
         puzzleDate: puzzle.date,
         grid,
         hintsUsed,
         startedAt,
+        elapsedSeconds: liveElapsedSeconds,
         status: nextStatus,
-        score: payload.score || 0,
+        score,
       }).catch(() => {});
+
+      const difficulty = deriveDifficultyLevel(solved, hintsUsed, liveElapsedSeconds, score);
+      await recordDailyActivity({
+        date: puzzle.date,
+        solved,
+        score,
+        timeTaken: liveElapsedSeconds,
+        difficulty,
+      }).catch(() => {});
+
+      const latestEntries = await getDailyActivityEntries().catch(() => []);
+      if (latestEntries.length) {
+        await maybeUnlockAchievements(latestEntries).catch(() => {});
+      }
+
+      await syncDailyActivity({ force: false }).catch(() => {});
 
       if (user?.id) {
         loadHistoryFromApi(user.id)
@@ -389,7 +506,17 @@ export function useDailyPuzzle(user) {
     } finally {
       setSubmitting(false);
     }
-  }, [grid, hintsUsed, persistLocalState, puzzle, startedAt, user?.id]);
+  }, [
+    grid,
+    hintsUsed,
+    persistLocalState,
+    puzzle,
+    maybeUnlockAchievements,
+    recordDailyActivity,
+    startedAt,
+    syncDailyActivity,
+    user?.id,
+  ]);
 
   const syncProgress = useCallback(async () => {
     if (!puzzle || !user?.id) {
@@ -397,31 +524,42 @@ export function useDailyPuzzle(user) {
     }
 
     setSyncing(true);
-    const liveElapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    const liveElapsedSeconds = calculateElapsedSeconds(startedAt, Date.now());
 
     try {
+      // Save current in-progress state and then flush queued activity.
       await saveProgressToApi({
         userId: user.id,
         puzzleDate: puzzle.date,
+        puzzleType: puzzle.puzzleType,
         status: "in_progress",
         hintsUsed,
         score: 0,
         elapsedSeconds: liveElapsedSeconds,
       });
+
+      const activitySync = await syncDailyActivity({ force: true }).catch(() => ({ synced: 0 }));
+
       setSubmitResult({
         solved: false,
         score: 0,
-        message: "Progress synced to backend.",
+        message:
+          activitySync.synced > 0
+            ? `Progress synced. Heatmap synced ${activitySync.synced} day(s).`
+            : "Progress synced to backend.",
         persisted: true,
       });
+
       const items = await loadHistoryFromApi(user.id);
       setHistory(items);
     } catch {
+      // If backend fails, keep local snapshot and clear hard error for UX.
       await persistLocalState({
         puzzleDate: puzzle.date,
         grid,
         hintsUsed,
         startedAt,
+        elapsedSeconds: liveElapsedSeconds,
         status: "in_progress",
         score: 0,
       }).catch(() => {});
@@ -437,7 +575,7 @@ export function useDailyPuzzle(user) {
     } finally {
       setSyncing(false);
     }
-  }, [grid, hintsUsed, persistLocalState, puzzle, startedAt, user?.id]);
+  }, [grid, hintsUsed, persistLocalState, puzzle, startedAt, syncDailyActivity, user?.id]);
 
   const summary = useMemo(() => {
     const completed = history.filter((entry) => entry.status === "completed");
@@ -472,6 +610,9 @@ export function useDailyPuzzle(user) {
     history,
     summary,
     cellStats,
+    activityEntries,
+    unsyncedActivityCount,
+    latestAchievement,
     updateCell,
     useHint,
     submitPuzzle,

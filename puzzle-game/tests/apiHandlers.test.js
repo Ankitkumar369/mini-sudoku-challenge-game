@@ -6,6 +6,7 @@ import todayHandler from "../api/puzzle/today.js";
 import submitHandler from "../api/puzzle/submit.js";
 import progressIndexHandler from "../api/progress/index.js";
 import progressSaveHandler from "../api/progress/save.js";
+import syncDailyScoresHandler from "../api/sync/daily-scores.js";
 import truecallerStartHandler from "../api/auth/truecaller/start.js";
 import { getSolutionForDate } from "../shared/dailyPuzzle.js";
 
@@ -139,6 +140,49 @@ test("POST /api/progress/save returns persisted false when DB is not configured"
   assert.equal(result.statusCode, 200);
   assert.equal(result.payload.ok, true);
   assert.equal(result.payload.persisted, false);
+});
+
+test("POST /api/sync/daily-scores returns persisted false when DB is not configured", async () => {
+  const result = await invoke(syncDailyScoresHandler, {
+    method: "POST",
+    body: {
+      userId: "guest_test",
+      entries: [{ date: "2026-02-11", score: 88, timeTaken: 140, solved: true }],
+    },
+  });
+
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.persisted, false);
+  assert.equal(result.payload.acceptedCount, 1);
+});
+
+test("POST /api/sync/daily-scores rejects missing entries", async () => {
+  const result = await invoke(syncDailyScoresHandler, {
+    method: "POST",
+    body: {
+      userId: "guest_test",
+      entries: [],
+    },
+  });
+
+  assert.equal(result.statusCode, 400);
+  assert.equal(result.payload.ok, false);
+  assert.equal(result.payload.error, "entries are required");
+});
+
+test("POST /api/sync/daily-scores rejects invalid score and unrealistic time", async () => {
+  const result = await invoke(syncDailyScoresHandler, {
+    method: "POST",
+    body: {
+      userId: "guest_test",
+      entries: [{ date: "2026-02-11", score: 200, timeTaken: 1, solved: true }],
+    },
+  });
+
+  assert.equal(result.statusCode, 400);
+  assert.equal(result.payload.ok, false);
+  assert.equal(result.payload.error, "No valid entries");
 });
 
 test("POST /api/auth/truecaller/start returns authorizeUrl when client id exists", async () => {

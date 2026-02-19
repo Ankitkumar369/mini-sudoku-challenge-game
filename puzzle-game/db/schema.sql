@@ -1,4 +1,4 @@
--- Phase 1 foundation schema for Daily Puzzle Logic Game
+-- Phase 1 foundation schema for Retention Puzzle Game
 
 create table if not exists app_users (
   id text primary key,
