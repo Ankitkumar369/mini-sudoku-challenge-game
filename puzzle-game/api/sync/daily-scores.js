@@ -4,6 +4,11 @@ import { getSqlClient, isDatabaseConfigured } from "../_lib/neon.js";
 import { upsertPuzzleProgress } from "../_lib/puzzleProgress.js";
 import { clampInteger, normalizeDateKey, toInteger } from "../_lib/validation.js";
 import { PUZZLE_TYPE } from "../../shared/dailyPuzzle.js";
+import {
+  applyRateLimitHeaders,
+  checkRateLimit,
+  isAllowedMutationOrigin,
+} from "../_lib/guards.js";
 
 function validateDateIsNotFuture(dateKey) {
   // Allow today's and local edge-case tomorrow UTC boundary only.
@@ -19,8 +24,19 @@ function isPlausibleTimeTaken(seconds) {
 }
 
 export default async function handler(req, res) {
+  const rateInfo = checkRateLimit(req, { key: "sync-daily-scores", max: 25, windowMs: 60 * 1000 });
+  applyRateLimitHeaders(res, rateInfo);
+
+  if (!rateInfo.allowed) {
+    return json(res, 429, { ok: false, error: "Too many requests. Please retry shortly." });
+  }
+
   if (req.method !== "POST") {
     return json(res, 405, { error: "Method not allowed" });
+  }
+
+  if (!isAllowedMutationOrigin(req)) {
+    return json(res, 403, { ok: false, error: "Origin not allowed" });
   }
 
   try {
@@ -34,6 +50,10 @@ export default async function handler(req, res) {
 
     if (entries.length === 0) {
       return json(res, 400, { ok: false, error: "entries are required" });
+    }
+
+    if (entries.length > 100) {
+      return json(res, 400, { ok: false, error: "Too many entries in a single sync request" });
     }
 
     const normalizedEntries = entries

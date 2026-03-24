@@ -2,6 +2,7 @@
 import { json } from "../_lib/http.js";
 import { getSqlClient, isDatabaseConfigured } from "../_lib/neon.js";
 import { ensurePuzzleProgressTable } from "../_lib/puzzleProgress.js";
+import { applyRateLimitHeaders, checkRateLimit } from "../_lib/guards.js";
 
 function toDateKey(value) {
   if (!value) {
@@ -13,6 +14,13 @@ function toDateKey(value) {
 }
 
 export default async function handler(req, res) {
+  const rateInfo = checkRateLimit(req, { key: "progress-index", max: 90, windowMs: 60 * 1000 });
+  applyRateLimitHeaders(res, rateInfo);
+
+  if (!rateInfo.allowed) {
+    return json(res, 429, { ok: false, error: "Too many requests. Please retry shortly." });
+  }
+
   if (req.method !== "GET") {
     return json(res, 405, { error: "Method not allowed" });
   }

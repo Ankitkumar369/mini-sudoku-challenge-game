@@ -1,5 +1,6 @@
 // Imports: common JSON response helper for API routes.
 import { json } from "../../_lib/http.js";
+import { applyRateLimitHeaders, checkRateLimit } from "../../_lib/guards.js";
 
 function readEnv(primaryKey, legacyKey = "") {
   return process.env[primaryKey] || (legacyKey ? process.env[legacyKey] : "") || "";
@@ -136,6 +137,13 @@ function createInvalidConfigResponse(res) {
 }
 
 export default async function handler(req, res) {
+  const rateInfo = checkRateLimit(req, { key: "truecaller-callback", max: 30, windowMs: 60 * 1000 });
+  applyRateLimitHeaders(res, rateInfo);
+
+  if (!rateInfo.allowed) {
+    return json(res, 429, { ok: false, error: "Too many requests. Please retry shortly." });
+  }
+
   if (req.method !== "GET") {
     return json(res, 405, { error: "Method not allowed" });
   }

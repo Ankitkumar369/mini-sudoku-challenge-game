@@ -7,6 +7,68 @@ const DAILY_PROGRESS_KEY = "progress.daily";
 const DAILY_ACTIVITY_KEY = "progress.activity.daily";
 const ACHIEVEMENTS_KEY = "progress.achievements";
 
+function encodeGrid(grid) {
+  if (!Array.isArray(grid) || grid.length === 0) {
+    return "";
+  }
+
+  const rowCount = grid.length;
+  const colCount = Array.isArray(grid[0]) ? grid[0].length : 0;
+
+  if (colCount === 0) {
+    return "";
+  }
+
+  let cells = "";
+
+  for (let row = 0; row < rowCount; row += 1) {
+    for (let col = 0; col < colCount; col += 1) {
+      const value = Number(grid[row]?.[col]);
+      cells += Number.isInteger(value) && value > 0 ? String(value) : "0";
+    }
+  }
+
+  return `${rowCount}x${colCount}:${cells}`;
+}
+
+function decodeGrid(encodedGrid) {
+  const raw = String(encodedGrid || "").trim();
+
+  if (!raw.includes(":")) {
+    return null;
+  }
+
+  const [sizePart, cells] = raw.split(":");
+  const [rowRaw, colRaw] = sizePart.split("x");
+  const rowCount = Number(rowRaw);
+  const colCount = Number(colRaw);
+
+  if (!Number.isInteger(rowCount) || !Number.isInteger(colCount) || rowCount <= 0 || colCount <= 0) {
+    return null;
+  }
+
+  if (cells.length !== rowCount * colCount) {
+    return null;
+  }
+
+  const grid = [];
+  let index = 0;
+
+  for (let row = 0; row < rowCount; row += 1) {
+    const line = [];
+
+    for (let col = 0; col < colCount; col += 1) {
+      const digit = Number(cells[index]);
+      line.push(Number.isInteger(digit) && digit > 0 ? digit : null);
+      index += 1;
+    }
+
+    grid.push(line);
+  }
+
+  return grid;
+}
+
 export async function getSessionUser() {
   return (await getValue(SESSION_USER_KEY)) || null;
 }
@@ -29,13 +91,38 @@ export async function setDailyProgress(progress) {
 
 export async function getPuzzleProgress(dateKey) {
   const progress = await getDailyProgress();
-  return progress[dateKey] || null;
+  const entry = progress[dateKey] || null;
+
+  if (!entry) {
+    return null;
+  }
+
+  // Backward compatible: keep old `grid` if present, otherwise decode compact representation.
+  if (Array.isArray(entry.grid)) {
+    return entry;
+  }
+
+  const decodedGrid = decodeGrid(entry.gridEncoded);
+  if (!decodedGrid) {
+    return entry;
+  }
+
+  return {
+    ...entry,
+    grid: decodedGrid,
+  };
 }
 
 export async function setPuzzleProgress(dateKey, payload) {
   // Stored by date so page refresh can restore exactly today's grid state.
   const progress = await getDailyProgress();
-  progress[dateKey] = payload;
+  const compressed = {
+    ...payload,
+    gridEncoded: encodeGrid(payload?.grid),
+  };
+
+  delete compressed.grid;
+  progress[dateKey] = compressed;
   return setDailyProgress(progress);
 }
 

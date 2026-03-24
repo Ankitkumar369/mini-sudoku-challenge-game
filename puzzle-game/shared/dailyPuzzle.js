@@ -1,38 +1,112 @@
-﻿export const PUZZLE_TYPES = Object.freeze({
-  CLASSIC: "latin-square-classic",
-  CHALLENGE: "latin-square-challenge",
-});
+﻿const PUZZLE_TYPE_MAP = {
+  CROSS_MATH: "stage-cross-math-grid",
+  SEQUENCE: "stage-sequence-intelligence",
+  LOGIC_CIRCUIT: "stage-logic-circuit",
+  TANGO: "stage-tango-logic",
+  QUEENS: "stage-queens-logic",
+  WORD_LOCK: "stage-word-lock",
+};
 
-export const PUZZLE_TYPE = PUZZLE_TYPES.CLASSIC;
+// Backward-compatible aliases.
+PUZZLE_TYPE_MAP.CLASSIC = PUZZLE_TYPE_MAP.CROSS_MATH;
+PUZZLE_TYPE_MAP.CHALLENGE = PUZZLE_TYPE_MAP.TANGO;
+
+export const PUZZLE_TYPES = Object.freeze(PUZZLE_TYPE_MAP);
+export const PUZZLE_TYPE = PUZZLE_TYPES.CROSS_MATH;
 export const GRID_SIZE = 4;
-const PUZZLE_SEED_SECRET = "capstone-daily-puzzle-v2";
+
+const PUZZLE_SEED_SECRET = "capstone-daily-puzzle-v3";
 
 const PUZZLE_CONFIG = {
-  [PUZZLE_TYPES.CLASSIC]: {
-    title: "Classic 4x4",
-    givenCount: 9,
+  [PUZZLE_TYPES.CROSS_MATH]: {
+    title: "Cross Math Grid",
+    stageNumber: 1,
+    givenCount: 10,
     hintLimit: 3,
+    clueCount: 0,
     hasSkyscraperClues: false,
     rules: [
       "Fill each row with numbers 1 to 4 without repetition.",
       "Fill each column with numbers 1 to 4 without repetition.",
+      "Start with rows/columns where most values are already given.",
     ],
   },
-  [PUZZLE_TYPES.CHALLENGE]: {
-    title: "Skyscraper Challenge 4x4",
-    givenCount: 6,
+  [PUZZLE_TYPES.SEQUENCE]: {
+    title: "Sequence Intelligence",
+    stageNumber: 2,
+    givenCount: 8,
     hintLimit: 2,
+    clueCount: 0,
+    hasSkyscraperClues: false,
+    rules: [
+      "Each row and column must contain 1 to 4 exactly once.",
+      "Use elimination chains to infer hidden cells.",
+      "Avoid guess-first; propagate constraints step by step.",
+    ],
+  },
+  [PUZZLE_TYPES.LOGIC_CIRCUIT]: {
+    title: "Logic Circuit",
+    stageNumber: 3,
+    givenCount: 7,
+    hintLimit: 2,
+    clueCount: 12,
     hasSkyscraperClues: true,
     rules: [
-      "Fill each row with numbers 1 to 4 without repetition.",
-      "Fill each column with numbers 1 to 4 without repetition.",
-      "Edge clues show how many towers are visible from that side.",
-      "A taller tower hides all shorter towers behind it.",
+      "Each row and column must contain 1 to 4 exactly once.",
+      "Edge clues represent visible towers from that direction.",
+      "A higher value hides all smaller values behind it.",
+    ],
+  },
+  [PUZZLE_TYPES.TANGO]: {
+    title: "Tango Logic",
+    stageNumber: 4,
+    givenCount: 6,
+    hintLimit: 1,
+    clueCount: 10,
+    hasSkyscraperClues: true,
+    rules: [
+      "Rows and columns must stay unique.",
+      "Work with fewer givens and sparse edge clues.",
+      "Check both row and column visibility after each move.",
+    ],
+  },
+  [PUZZLE_TYPES.QUEENS]: {
+    title: "Queens Logic",
+    stageNumber: 5,
+    givenCount: 5,
+    hintLimit: 1,
+    clueCount: 8,
+    hasSkyscraperClues: true,
+    rules: [
+      "Rows and columns must stay unique.",
+      "Only a few edge clues are visible in this stage.",
+      "Use contradiction checks before locking a number.",
+    ],
+  },
+  [PUZZLE_TYPES.WORD_LOCK]: {
+    title: "Word Lock",
+    stageNumber: 6,
+    givenCount: 4,
+    hintLimit: 1,
+    clueCount: 6,
+    hasSkyscraperClues: true,
+    rules: [
+      "Final stage: minimum givens and minimal clue visibility.",
+      "All row, column, and visible clue constraints must be valid.",
+      "Solve with pure deduction for daily run completion.",
     ],
   },
 };
 
 const PUZZLE_TYPE_LIST = Object.keys(PUZZLE_CONFIG);
+
+export const DAILY_STAGES = Object.freeze(
+  PUZZLE_TYPE_LIST.map((puzzleType) => ({
+    puzzleType,
+    title: PUZZLE_CONFIG[puzzleType].title,
+    stageNumber: PUZZLE_CONFIG[puzzleType].stageNumber,
+  }))
+);
 
 function toDateKey(value) {
   const source = value instanceof Date ? value : new Date(value);
@@ -51,7 +125,6 @@ function rightRotate(value, amount) {
   return (value >>> amount) | (value << (32 - amount));
 }
 
-// Synchronous SHA-256 keeps deterministic generation identical in client and server runtimes.
 function sha256Hex(text) {
   const maxWord = 2 ** 32;
   const words = [];
@@ -187,19 +260,18 @@ function createBaseGrid() {
   );
 }
 
-function normalizePuzzleType(puzzleType, dateKey) {
+function normalizePuzzleType(puzzleType) {
   const candidate = String(puzzleType || "").trim();
 
   if (candidate && PUZZLE_CONFIG[candidate]) {
     return candidate;
   }
 
-  const index = hashToSeed(`${dateKey}:type:v3`) % PUZZLE_TYPE_LIST.length;
-  return PUZZLE_TYPE_LIST[index];
+  return PUZZLE_TYPE;
 }
 
 function createSolutionGrid(dateKey, puzzleType) {
-  const random = seededRandom(hashToSeed(`${dateKey}:${puzzleType}:solution:v3`));
+  const random = seededRandom(hashToSeed(`${dateKey}:${puzzleType}:solution:v4`));
   const rowOrder = shuffle([0, 1, 2, 3], random);
   const colOrder = shuffle([0, 1, 2, 3], random);
   const symbols = shuffle([1, 2, 3, 4], random);
@@ -215,7 +287,7 @@ function createSolutionGrid(dateKey, puzzleType) {
 
 function createGivensGrid(solution, dateKey, puzzleType) {
   const givenCount = PUZZLE_CONFIG[puzzleType]?.givenCount || 8;
-  const random = seededRandom(hashToSeed(`${dateKey}:${puzzleType}:givens:v3`));
+  const random = seededRandom(hashToSeed(`${dateKey}:${puzzleType}:givens:v4`));
   const allIndexes = Array.from({ length: GRID_SIZE * GRID_SIZE }, (_, index) => index);
   const givenIndexes = new Set(shuffle(allIndexes, random).slice(0, givenCount));
 
@@ -262,14 +334,85 @@ function createSkyscraperClues(solution) {
   return { top, right, bottom, left };
 }
 
-function createPuzzleClues(solution, puzzleType) {
+function createEmptyClues() {
+  return {
+    top: Array.from({ length: GRID_SIZE }, () => null),
+    right: Array.from({ length: GRID_SIZE }, () => null),
+    bottom: Array.from({ length: GRID_SIZE }, () => null),
+    left: Array.from({ length: GRID_SIZE }, () => null),
+  };
+}
+
+function applyClueMask(fullClues, dateKey, puzzleType, clueCount) {
+  const maxClues = GRID_SIZE * 4;
+
+  if (!Number.isInteger(clueCount) || clueCount <= 0) {
+    return createEmptyClues();
+  }
+
+  if (clueCount >= maxClues) {
+    return fullClues;
+  }
+
+  const random = seededRandom(hashToSeed(`${dateKey}:${puzzleType}:clues:v4`));
+  const sideOrder = shuffle(["top", "right", "bottom", "left"], random);
+  const pool = [];
+
+  for (const side of ["top", "right", "bottom", "left"]) {
+    for (let index = 0; index < GRID_SIZE; index += 1) {
+      pool.push({ side, index });
+    }
+  }
+
+  const selected = [];
+  const used = new Set();
+
+  // Keep at least one clue on each side when possible.
+  for (const side of sideOrder) {
+    if (selected.length >= clueCount) {
+      break;
+    }
+
+    const sideCandidates = pool.filter((item) => item.side === side);
+    const chosen = sideCandidates[Math.floor(random() * sideCandidates.length)];
+    const key = `${chosen.side}-${chosen.index}`;
+
+    if (!used.has(key)) {
+      used.add(key);
+      selected.push(chosen);
+    }
+  }
+
+  const remaining = shuffle(pool, random);
+  for (const item of remaining) {
+    if (selected.length >= clueCount) {
+      break;
+    }
+
+    const key = `${item.side}-${item.index}`;
+    if (!used.has(key)) {
+      used.add(key);
+      selected.push(item);
+    }
+  }
+
+  const masked = createEmptyClues();
+  for (const { side, index } of selected) {
+    masked[side][index] = fullClues[side][index];
+  }
+
+  return masked;
+}
+
+function createPuzzleClues(solution, dateKey, puzzleType) {
   const config = PUZZLE_CONFIG[puzzleType];
 
   if (!config?.hasSkyscraperClues) {
     return null;
   }
 
-  return createSkyscraperClues(solution);
+  const fullClues = createSkyscraperClues(solution);
+  return applyClueMask(fullClues, dateKey, puzzleType, config.clueCount);
 }
 
 function normalizeGrid(rawGrid) {
@@ -329,13 +472,11 @@ function validateGridStateFromPuzzle(grid, puzzle) {
   let clueViolationCount = 0;
   let givenMismatchCount = 0;
 
-  // Row duplicates
   for (let row = 0; row < GRID_SIZE; row += 1) {
     const positions = new Map();
 
     for (let col = 0; col < GRID_SIZE; col += 1) {
       const value = grid[row][col];
-
       if (value === null) {
         continue;
       }
@@ -357,13 +498,11 @@ function validateGridStateFromPuzzle(grid, puzzle) {
     }
   }
 
-  // Column duplicates
   for (let col = 0; col < GRID_SIZE; col += 1) {
     const positions = new Map();
 
     for (let row = 0; row < GRID_SIZE; row += 1) {
       const value = grid[row][col];
-
       if (value === null) {
         continue;
       }
@@ -385,7 +524,6 @@ function validateGridStateFromPuzzle(grid, puzzle) {
     }
   }
 
-  // Given-cell mismatch (should not happen in normal UI, but guards API tampering).
   for (let row = 0; row < GRID_SIZE; row += 1) {
     for (let col = 0; col < GRID_SIZE; col += 1) {
       const given = puzzle.givens[row][col];
@@ -398,7 +536,6 @@ function validateGridStateFromPuzzle(grid, puzzle) {
     }
   }
 
-  // Optional skyscraper clues for challenge puzzle type.
   if (puzzle.clues) {
     for (let row = 0; row < GRID_SIZE; row += 1) {
       const leftEval = evaluateSkyscraperLine(puzzle.clues.left[row], getLineValues(grid, "row", row));
@@ -455,13 +592,12 @@ export function getTodayDateKey() {
   return toDateKey(new Date());
 }
 
-export function getPuzzleTypeForDate(dateKey = getTodayDateKey()) {
-  const safeDateKey = toDateKey(dateKey);
-  return normalizePuzzleType("", safeDateKey);
+export function getPuzzleTypeForDate() {
+  return PUZZLE_TYPE;
 }
 
 export function getPuzzleConfig(puzzleType) {
-  const safeType = normalizePuzzleType(puzzleType, getTodayDateKey());
+  const safeType = normalizePuzzleType(puzzleType);
   return {
     puzzleType: safeType,
     ...PUZZLE_CONFIG[safeType],
@@ -470,16 +606,17 @@ export function getPuzzleConfig(puzzleType) {
 
 export function createDailyPuzzle(dateKey = getTodayDateKey(), puzzleType = "") {
   const safeDateKey = toDateKey(dateKey);
-  const safeType = normalizePuzzleType(puzzleType, safeDateKey);
+  const safeType = normalizePuzzleType(puzzleType);
   const config = PUZZLE_CONFIG[safeType];
   const solution = createSolutionGrid(safeDateKey, safeType);
   const givens = createGivensGrid(solution, safeDateKey, safeType);
-  const clues = createPuzzleClues(solution, safeType);
+  const clues = createPuzzleClues(solution, safeDateKey, safeType);
 
   return {
     date: safeDateKey,
     puzzleType: safeType,
     puzzleTitle: config.title,
+    stageNumber: config.stageNumber,
     size: GRID_SIZE,
     hintLimit: config.hintLimit,
     rules: config.rules,
@@ -490,7 +627,7 @@ export function createDailyPuzzle(dateKey = getTodayDateKey(), puzzleType = "") 
 
 export function getSolutionForDate(dateKey = getTodayDateKey(), puzzleType = "") {
   const safeDateKey = toDateKey(dateKey);
-  const safeType = normalizePuzzleType(puzzleType, safeDateKey);
+  const safeType = normalizePuzzleType(puzzleType);
   return createSolutionGrid(safeDateKey, safeType);
 }
 

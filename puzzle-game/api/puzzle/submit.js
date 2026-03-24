@@ -4,6 +4,11 @@ import { getSqlClient, isDatabaseConfigured } from "../_lib/neon.js";
 import { upsertPuzzleProgress } from "../_lib/puzzleProgress.js";
 import { normalizeOptionalDateKey, toNonNegativeInteger } from "../_lib/validation.js";
 import { evaluateSubmission, getTodayDateKey } from "../../shared/dailyPuzzle.js";
+import {
+  applyRateLimitHeaders,
+  checkRateLimit,
+  isAllowedMutationOrigin,
+} from "../_lib/guards.js";
 
 // Same scoring formula is used for local fallback and API result.
 function calculateScore({ solved, hintsUsed, elapsedSeconds }) {
@@ -22,6 +27,20 @@ function isValidElapsedSeconds(value) {
 
 function isValidHints(value) {
   return value >= 0 && value <= 10;
+}
+
+function isValidAnswerGrid(answers) {
+  if (!Array.isArray(answers) || answers.length !== 4) {
+    return false;
+  }
+
+  for (const row of answers) {
+    if (!Array.isArray(row) || row.length !== 4) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function parseSubmitPayload(body) {
@@ -54,6 +73,10 @@ function validateSubmitPayload(payload) {
 
   if (!isValidHints(payload.hintsUsed)) {
     return "hintsUsed out of range";
+  }
+
+  if (!isValidAnswerGrid(payload.answers)) {
+    return "answers must be a 4x4 matrix";
   }
 
   return "";
@@ -119,8 +142,19 @@ async function handleSubmit(body) {
 }
 
 export default async function handler(req, res) {
+  const rateInfo = checkRateLimit(req, { key: "puzzle-submit", max: 40, windowMs: 60 * 1000 });
+  applyRateLimitHeaders(res, rateInfo);
+
+  if (!rateInfo.allowed) {
+    return json(res, 429, { ok: false, error: "Too many requests. Please retry shortly." });
+  }
+
   if (req.method !== "POST") {
     return json(res, 405, { error: "Method not allowed" });
+  }
+
+  if (!isAllowedMutationOrigin(req)) {
+    return json(res, 403, { ok: false, error: "Origin not allowed" });
   }
 
   try {

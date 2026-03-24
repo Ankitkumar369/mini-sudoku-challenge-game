@@ -37,6 +37,7 @@ const requiredForGoogle = [
 ];
 
 const requiredForDatabase = ["DATABASE_URL"];
+const requiredForProductionBase = ["PUBLIC_APP_URL"];
 const requiredForTruecaller = [
   ["TRUECALLER_CLIENT_ID", "TRUECALLLER_CLIENT_ID"],
   ["TRUECALLER_CLIENT_SECRET", "TRUECALLLER_CLIENT_SECRET"],
@@ -55,12 +56,16 @@ function missingTruecallerKeys(groups) {
 
 const missingGoogle = missing(requiredForGoogle);
 const missingDatabase = missing(requiredForDatabase);
+const missingProductionBase = missing(requiredForProductionBase);
 const missingTruecaller = missingTruecallerKeys(requiredForTruecaller);
+const productionMode = process.argv.includes("--production");
 
 console.log("Environment doctor report:");
 console.log(`- Google auth: ${missingGoogle.length ? "not ready" : "ready"}`);
 console.log(`- Database sync: ${missingDatabase.length ? "not ready" : "ready"}`);
 console.log(`- Truecaller auth: ${missingTruecaller.length ? "not ready" : "ready"}`);
+console.log(`- Production base url: ${missingProductionBase.length ? "not ready" : "ready"}`);
+console.log(`- Mode: ${productionMode ? "production check" : "development check"}`);
 
 if (missingGoogle.length) {
   console.log(`  Missing Google keys: ${missingGoogle.join(", ")}`);
@@ -72,10 +77,25 @@ if (missingDatabase.length) {
 
 if (missingTruecaller.length) {
   console.log(`  Missing Truecaller keys: ${missingTruecaller.join(", ")}`);
+  console.log("  Note: Truecaller is optional. Google + Guest auth is sufficient for production launch.");
+}
+
+if (missingProductionBase.length) {
+  console.log(`  Missing production keys: ${missingProductionBase.join(", ")}`);
 }
 
 // Fail only when core client auth keys are missing.
 // Database and Truecaller are optional for local/offline demo mode.
 if (missingGoogle.length) {
   process.exit(1);
+}
+
+if (productionMode) {
+  const hasProductionErrors =
+    missingDatabase.length > 0 ||
+    missingProductionBase.length > 0;
+
+  if (hasProductionErrors) {
+    process.exit(1);
+  }
 }

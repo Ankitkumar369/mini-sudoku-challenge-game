@@ -33,7 +33,7 @@ test("createDailyPuzzle is deterministic for the same date", () => {
   assert.deepEqual(first, second);
   assert.equal(first.size, GRID_SIZE);
   assert.equal(first.date, "2026-02-11");
-  assert.ok([6, 9].includes(countGivens(first.givens)));
+  assert.ok(countGivens(first.givens) >= 4 && countGivens(first.givens) <= 10);
   assert.ok(Object.values(PUZZLE_TYPES).includes(first.puzzleType));
 });
 

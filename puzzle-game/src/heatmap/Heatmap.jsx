@@ -9,11 +9,11 @@ import {
 } from "./heatmapLogic";
 
 const INTENSITY_CLASS = {
-  0: "bg-[rgba(232,230,230,0.18)]",
-  1: "bg-[rgba(248,201,180,0.45)]",
-  2: "bg-[rgba(235,91,44,0.58)]",
-  3: "bg-[rgba(44,49,136,0.78)]",
-  4: "bg-[rgba(44,49,136,0.98)]",
+  0: "bg-[rgba(221,227,243,0.6)]",
+  1: "bg-[rgba(198,213,251,0.8)]",
+  2: "bg-[rgba(148,176,245,0.9)]",
+  3: "bg-[rgba(102,138,233,0.95)]",
+  4: "bg-[rgba(70,107,207,1)]",
 };
 
 function formatTooltip(cell) {
@@ -61,23 +61,23 @@ export default function Heatmap({ activityEntries, unsyncedCount }) {
   );
 
   return (
-    <section className="space-y-4 rounded-2xl border border-[rgba(44,49,136,0.52)] bg-[rgba(24,31,88,0.45)] p-4">
+    <section className="space-y-4 rounded-2xl border border-[rgba(121,150,225,0.7)] bg-[linear-gradient(150deg,#f8fbff_0%,#edf3ff_55%,#e4edff_100%)] p-4 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-[rgba(248,201,180,0.88)]">
+          <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-[#1a228f]">
             Activity Heatmap
           </h3>
-          <p className="text-xs text-[rgba(232,230,230,0.88)]">
+          <p className="text-xs text-[#46527e]">
             Current streak {currentStreak} days | Longest streak {longestStreak} days | Solved days{" "}
             {solvedDays}
           </p>
         </div>
-        <label className="text-xs text-[rgba(232,230,230,0.88)]">
+        <label className="text-xs text-[#46527e]">
           Year{" "}
           <select
             value={selectedYear}
             onChange={(event) => setSelectedYear(Number(event.target.value))}
-            className="rounded-md border border-[rgba(248,201,180,0.35)] bg-[rgba(12,26,75,0.6)] px-2 py-1 text-[#e8e6e6] outline-none"
+            className="rounded-md border border-[rgba(121,150,225,0.48)] bg-white px-2 py-1 text-[#2e3d72] outline-none"
           >
             {selectableYears.map((year) => (
               <option key={year} value={year}>
@@ -90,7 +90,7 @@ export default function Heatmap({ activityEntries, unsyncedCount }) {
 
       <div className="overflow-x-auto">
         {/* GitHub-style weekly columns, 7 rows per weekday. */}
-        <div className="inline-flex gap-1 rounded-xl border border-[rgba(44,49,136,0.4)] bg-[rgba(12,26,75,0.5)] p-3">
+        <div className="inline-flex gap-1 rounded-xl border border-[rgba(121,150,225,0.45)] bg-white p-3">
           {heatmap.columns.map((week, weekIndex) => (
             <div key={`week-${weekIndex}`} className="grid grid-rows-7 gap-1">
               {week.map((cell, dayIndex) => {
@@ -109,8 +109,8 @@ export default function Heatmap({ activityEntries, unsyncedCount }) {
                     title={formatTooltip(cell)}
                     className={`h-3.5 w-3.5 rounded-[3px] border transition-all duration-300 ${
                       cell.date === todayKey
-                        ? "border-[rgba(248,201,180,0.9)] ring-1 ring-[rgba(248,201,180,0.5)]"
-                        : "border-[rgba(255,255,255,0.08)]"
+                        ? "border-[rgba(70,107,207,0.95)] ring-1 ring-[rgba(70,107,207,0.35)]"
+                        : "border-[rgba(121,150,225,0.3)]"
                     } ${
                       INTENSITY_CLASS[cell.intensity]
                     }`}
@@ -122,23 +122,23 @@ export default function Heatmap({ activityEntries, unsyncedCount }) {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 text-xs text-[rgba(232,230,230,0.88)]">
+      <div className="flex flex-wrap items-center gap-2 text-xs text-[#4b5887]">
         {/* Intensity legend from no activity (0) to best completion (4). */}
         <span>Less</span>
         {[0, 1, 2, 3, 4].map((level) => (
           <span
             key={`legend-${level}`}
-            className={`h-3.5 w-3.5 rounded-[3px] border border-[rgba(255,255,255,0.08)] ${INTENSITY_CLASS[level]}`}
+            className={`h-3.5 w-3.5 rounded-[3px] border border-[rgba(121,150,225,0.28)] ${INTENSITY_CLASS[level]}`}
           />
         ))}
         <span>More</span>
         {/* Offline queue count means local solved days are waiting for server sync. */}
         {unsyncedCount > 0 ? (
-          <span className="rounded-full border border-[rgba(235,91,44,0.4)] bg-[rgba(235,91,44,0.16)] px-2 py-0.5 text-[rgba(248,201,180,0.95)]">
+          <span className="rounded-full border border-[rgba(215,99,72,0.45)] bg-[rgba(244,201,188,0.55)] px-2 py-0.5 text-[#7a2f1c]">
             Offline queue {unsyncedCount}
           </span>
         ) : (
-          <span className="rounded-full border border-[rgba(44,49,136,0.65)] bg-[rgba(44,49,136,0.28)] px-2 py-0.5">
+          <span className="rounded-full border border-[rgba(121,150,225,0.45)] bg-[rgba(214,224,247,0.72)] px-2 py-0.5 text-[#2d3f75]">
             Synced
           </span>
         )}

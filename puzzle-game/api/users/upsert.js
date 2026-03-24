@@ -1,5 +1,10 @@
 import { json, readJsonBody } from "../_lib/http.js";
-import { getSqlClient } from "../_lib/neon.js";
+import { getSqlClient, isDatabaseConfigured } from "../_lib/neon.js";
+import {
+  applyRateLimitHeaders,
+  checkRateLimit,
+  isAllowedMutationOrigin,
+} from "../_lib/guards.js";
 
 const CREATE_USERS_TABLE_SQL = `
   create table if not exists app_users (
@@ -13,8 +18,19 @@ const CREATE_USERS_TABLE_SQL = `
 `;
 
 export default async function handler(req, res) {
+  const rateInfo = checkRateLimit(req, { key: "users-upsert", max: 25, windowMs: 60 * 1000 });
+  applyRateLimitHeaders(res, rateInfo);
+
+  if (!rateInfo.allowed) {
+    return json(res, 429, { ok: false, error: "Too many requests. Please retry shortly." });
+  }
+
   if (req.method !== "POST") {
     return json(res, 405, { error: "Method not allowed" });
+  }
+
+  if (!isAllowedMutationOrigin(req)) {
+    return json(res, 403, { ok: false, error: "Origin not allowed" });
   }
 
   try {
@@ -32,6 +48,16 @@ export default async function handler(req, res) {
       return json(res, 400, {
         error: "id and provider are required",
       });
+    }
+
+    if (user.id.length > 128 || user.provider.length > 32) {
+      return json(res, 400, {
+        error: "id/provider size is invalid",
+      });
+    }
+
+    if (!isDatabaseConfigured()) {
+      return json(res, 200, { ok: true, persisted: false });
     }
 
     const sql = getSqlClient();

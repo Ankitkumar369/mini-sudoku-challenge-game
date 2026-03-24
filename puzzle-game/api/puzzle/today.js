@@ -1,6 +1,7 @@
 // Imports: JSON response helper and deterministic daily puzzle generator.
 import { json } from "../_lib/http.js";
 import { createDailyPuzzle, getTodayDateKey } from "../../shared/dailyPuzzle.js";
+import { applyRateLimitHeaders, checkRateLimit } from "../_lib/guards.js";
 
 function getDateKeyFromOffset(offsetMinutes) {
   const parsedOffset = Number(offsetMinutes);
@@ -19,6 +20,13 @@ function getDateKeyFromOffset(offsetMinutes) {
 }
 
 export default async function handler(req, res) {
+  const rateInfo = checkRateLimit(req, { key: "puzzle-today", max: 120, windowMs: 60 * 1000 });
+  applyRateLimitHeaders(res, rateInfo);
+
+  if (!rateInfo.allowed) {
+    return json(res, 429, { ok: false, error: "Too many requests. Please retry shortly." });
+  }
+
   if (req.method !== "GET") {
     return json(res, 405, { error: "Method not allowed" });
   }

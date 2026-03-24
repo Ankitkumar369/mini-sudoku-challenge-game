@@ -1,8 +1,16 @@
 // Imports: JSON helper and database connectivity utilities.
 import { json } from "./_lib/http.js";
 import { getSqlClient, isDatabaseConfigured } from "./_lib/neon.js";
+import { applyRateLimitHeaders, checkRateLimit } from "./_lib/guards.js";
 
 export default async function handler(req, res) {
+  const rateInfo = checkRateLimit(req, { key: "health", max: 120, windowMs: 60 * 1000 });
+  applyRateLimitHeaders(res, rateInfo);
+
+  if (!rateInfo.allowed) {
+    return json(res, 429, { ok: false, error: "Too many requests. Please retry shortly." });
+  }
+
   if (req.method !== "GET") {
     return json(res, 405, { error: "Method not allowed" });
   }

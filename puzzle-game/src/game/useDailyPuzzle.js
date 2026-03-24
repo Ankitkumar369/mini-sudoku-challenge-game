@@ -1,6 +1,7 @@
 // Imports: gameplay state dependencies, local storage helpers, and API adapters.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  getDailyProgress,
   clearPuzzleProgress,
   getDailyActivityEntries,
   getPuzzleProgress,
@@ -11,6 +12,7 @@ import {
   upsertDailyActivityEntry,
 } from "../lib/localProgress";
 import {
+  DAILY_STAGES,
   GRID_SIZE,
   createDailyPuzzle,
   createInitialGrid,
@@ -38,8 +40,35 @@ import {
 
 const SYNC_BATCH_SIZE = 5;
 
+function getStageProgressKey(dateKey, puzzleType) {
+  return `${dateKey}:${puzzleType}`;
+}
+
+function buildStageStatuses(dateKey, progressMap) {
+  let previousCompleted = true;
+
+  return DAILY_STAGES.map((stage) => {
+    const key = getStageProgressKey(dateKey, stage.puzzleType);
+    const stageRecord = progressMap[key];
+    const completed = stageRecord?.status === "completed";
+    const unlocked = stage.stageNumber === 1 ? true : previousCompleted;
+
+    previousCompleted = previousCompleted && completed;
+
+    return {
+      ...stage,
+      key,
+      unlocked,
+      completed,
+    };
+  });
+}
+
 export function useDailyPuzzle(user) {
   const [loading, setLoading] = useState(true);
+  const [selectedStageType, setSelectedStageType] = useState(DAILY_STAGES[0].puzzleType);
+  const [stageStatuses, setStageStatuses] = useState([]);
+  const [stageEvaluations, setStageEvaluations] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [puzzle, setPuzzle] = useState(null);
@@ -64,19 +93,47 @@ export function useDailyPuzzle(user) {
     }
   }, []);
 
+  const refreshStageStatuses = useCallback(async (dateKey) => {
+    if (!dateKey) {
+      setStageStatuses([]);
+      setStageEvaluations([]);
+      return [];
+    }
+
+    const progressMap = await getDailyProgress().catch(() => ({}));
+    const next = buildStageStatuses(dateKey, progressMap);
+    const evaluations = next.map((stage) => {
+      const entry = progressMap[stage.key] || {};
+      return {
+        ...stage,
+        status: entry.status || "locked",
+        score: Number(entry.score) || 0,
+        elapsedSeconds: Number(entry.elapsedSeconds) || 0,
+        hintsUsed: Number(entry.hintsUsed) || 0,
+        updatedAt: Number(entry.updatedAt) || 0,
+      };
+    });
+    setStageStatuses(next);
+    setStageEvaluations(evaluations);
+    return next;
+  }, []);
+
   const persistLocalState = useCallback(async (nextState) => {
-    if (!nextState?.puzzleDate) {
+    if (!nextState?.puzzleDate || !nextState?.puzzleType) {
       return;
     }
 
+    const progressKey = getStageProgressKey(nextState.puzzleDate, nextState.puzzleType);
+
     // Save a resumable snapshot for offline-first behavior.
-    await setPuzzleProgress(nextState.puzzleDate, {
+    await setPuzzleProgress(progressKey, {
       grid: nextState.grid,
       hintsUsed: nextState.hintsUsed,
       startedAt: nextState.startedAt || null,
       elapsedSeconds: Number.isFinite(nextState.elapsedSeconds) ? nextState.elapsedSeconds : 0,
       status: nextState.status,
       score: nextState.score || 0,
+      puzzleType: nextState.puzzleType,
       updatedAt: Date.now(),
     });
   }, []);
@@ -175,13 +232,27 @@ export function useDailyPuzzle(user) {
 
       try {
         // Primary source is API so timezone/date rules remain consistent.
-        nextPuzzle = await fetchTodayPuzzle();
+        nextPuzzle = await fetchTodayPuzzle(selectedStageType);
       } catch {
         // Offline fallback uses deterministic local puzzle generation.
-        nextPuzzle = createDailyPuzzle();
+        nextPuzzle = createDailyPuzzle(undefined, selectedStageType);
       }
 
-      const cached = await getPuzzleProgress(nextPuzzle.date);
+      const statuses = await refreshStageStatuses(nextPuzzle.date);
+      const activeStage = statuses.find((stage) => stage.puzzleType === selectedStageType);
+
+      if (activeStage && !activeStage.unlocked) {
+        const firstUnlocked = statuses.find((stage) => stage.unlocked);
+
+        if (firstUnlocked && firstUnlocked.puzzleType !== selectedStageType) {
+          setSelectedStageType(firstUnlocked.puzzleType);
+          return;
+        }
+      }
+
+      const stageProgressKey = getStageProgressKey(nextPuzzle.date, selectedStageType);
+      const cached =
+        (await getPuzzleProgress(stageProgressKey)) || (await getPuzzleProgress(nextPuzzle.date));
       const nextGrid = sanitizeGridFromProgress(nextPuzzle.givens, cached?.grid);
       const nextHintsUsed = Number(cached?.hintsUsed) || 0;
       const cachedStartedAt = Number(cached?.startedAt);
@@ -205,7 +276,7 @@ export function useDailyPuzzle(user) {
         setSubmitResult({
           solved: true,
           score: Number(cached.score) || 0,
-          message: "Puzzle already completed for today.",
+          message: "Stage already completed for today.",
           persisted: false,
         });
       }
@@ -214,7 +285,7 @@ export function useDailyPuzzle(user) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [refreshStageStatuses, selectedStageType]);
 
   useEffect(() => {
     // Initial load: puzzle + local activity cache.
@@ -354,6 +425,7 @@ export function useDailyPuzzle(user) {
 
       await persistLocalState({
         puzzleDate: puzzle.date,
+        puzzleType: puzzle.puzzleType,
         grid: nextGrid,
         hintsUsed,
         startedAt: interactionStartedAt,
@@ -413,6 +485,7 @@ export function useDailyPuzzle(user) {
 
     await persistLocalState({
       puzzleDate: puzzle.date,
+      puzzleType: puzzle.puzzleType,
       grid: nextGrid,
       hintsUsed: nextHintsUsed,
       startedAt: interactionStartedAt,
@@ -433,7 +506,8 @@ export function useDailyPuzzle(user) {
     setCompletedElapsedSeconds(null);
     setSubmitResult(null);
 
-    await clearPuzzleProgress(puzzle.date).catch(() => {});
+    const stageProgressKey = getStageProgressKey(puzzle.date, puzzle.puzzleType);
+    await clearPuzzleProgress(stageProgressKey).catch(() => {});
   }, [puzzle]);
 
   const submitPuzzle = useCallback(async () => {
@@ -491,6 +565,7 @@ export function useDailyPuzzle(user) {
 
       await persistLocalState({
         puzzleDate: puzzle.date,
+        puzzleType: puzzle.puzzleType,
         grid,
         hintsUsed,
         startedAt,
@@ -499,10 +574,36 @@ export function useDailyPuzzle(user) {
         score,
       }).catch(() => {});
 
+      const nextStatuses = await refreshStageStatuses(puzzle.date).catch(() => []);
+      const completedStages = nextStatuses.filter((stage) => stage.completed).length;
+      const totalStages = nextStatuses.length || DAILY_STAGES.length;
+      const allStagesComplete = totalStages > 0 && completedStages === totalStages;
+
+      const solvedMessage = allStagesComplete
+        ? `Daily run completed. ${completedStages}/${totalStages} stages clear. Score ${score}.`
+        : `Stage clear. ${completedStages}/${totalStages} stages completed.`;
+
+      if (solved) {
+        setSubmitResult({
+          solved: true,
+          score,
+          message: solvedMessage,
+          persisted: Boolean(payload.persisted),
+        });
+
+        if (!allStagesComplete) {
+          const nextUnlockedStage = nextStatuses.find((stage) => stage.unlocked && !stage.completed);
+
+          if (nextUnlockedStage && nextUnlockedStage.puzzleType !== puzzle.puzzleType) {
+            setSelectedStageType(nextUnlockedStage.puzzleType);
+          }
+        }
+      }
+
       const difficulty = deriveDifficultyLevel(solved, hintsUsed, liveElapsedSeconds, score);
       await recordDailyActivity({
         date: puzzle.date,
-        solved,
+        solved: solved && allStagesComplete,
         score,
         timeTaken: liveElapsedSeconds,
         difficulty,
@@ -531,6 +632,7 @@ export function useDailyPuzzle(user) {
     persistLocalState,
     puzzle,
     maybeUnlockAchievements,
+    refreshStageStatuses,
     recordDailyActivity,
     startedAt,
     syncDailyActivity,
@@ -575,6 +677,7 @@ export function useDailyPuzzle(user) {
       // If backend fails, keep local snapshot and clear hard error for UX.
       await persistLocalState({
         puzzleDate: puzzle.date,
+        puzzleType: puzzle.puzzleType,
         grid,
         hintsUsed,
         startedAt,
@@ -616,8 +719,35 @@ export function useDailyPuzzle(user) {
     };
   }, [history]);
 
+  const completedStageCount = useMemo(
+    () => stageStatuses.filter((stage) => stage.completed).length,
+    [stageStatuses]
+  );
+  const totalStages = stageStatuses.length || DAILY_STAGES.length;
+  const dailyRunCompleted = totalStages > 0 && completedStageCount === totalStages;
+
+  const selectStage = useCallback(
+    (nextStageType) => {
+      const stage = stageStatuses.find((item) => item.puzzleType === nextStageType);
+
+      if (!stage || !stage.unlocked) {
+        return false;
+      }
+
+      setSelectedStageType(nextStageType);
+      return true;
+    },
+    [stageStatuses]
+  );
+
   return {
     loading,
+    stageStatuses,
+    stageEvaluations,
+    selectedStageType,
+    completedStageCount,
+    totalStages,
+    dailyRunCompleted,
     submitting,
     syncing,
     puzzle,
@@ -633,6 +763,7 @@ export function useDailyPuzzle(user) {
     unsyncedActivityCount,
     validationState,
     latestAchievement,
+    selectStage,
     updateCell,
     useHint,
     submitPuzzle,

@@ -8,12 +8,14 @@ End-to-end capstone implementation with authentication, playable daily puzzle, l
 - Daily 4x4 logic puzzle generation (deterministic by date)
 - Hint, reset, submit, score, and timer flow
 - Local IndexedDB resume support for in-progress puzzle state
+- Compact grid encoding in IndexedDB to reduce storage footprint
 - Guest sign-in mode for local play without Firebase credentials
 - Automated tests for puzzle generation and validation rules
 - API handler tests for puzzle/progress/auth endpoints
 - Google login via Firebase Auth
 - Truecaller OAuth scaffold via backend endpoints
 - Neon PostgreSQL progress sync endpoints
+- Batched sync policy (every 5 solved entries or on logout)
 - Vercel serverless + SPA rewrites
 
 ## Project structure
@@ -105,6 +107,11 @@ npm run check
 npm run doctor
 ```
 
+- Production environment preflight:
+```bash
+npm run doctor:prod
+```
+
 - Production build:
 ```bash
 npm run build
@@ -115,6 +122,93 @@ npm run build
 1. Import repo in Vercel.
 2. Add env vars from `.env.example`.
 3. Deploy; Vercel serves both SPA and API routes.
+
+## Production-ready setup (Step-by-step)
+
+### 1) External services required
+
+You need these external services for full production mode:
+
+- Firebase project (Google auth)
+- Neon PostgreSQL database (progress sync + history + leaderboard data)
+- Truecaller developer app (optional if you want Truecaller login enabled)
+- Vercel project (frontend + serverless API deployment)
+
+### 2) How to get each required value
+
+1. Firebase (Google Sign-in):
+   - Open Firebase Console -> create/select project.
+   - Enable Authentication -> Google provider.
+   - Project settings -> Web app config -> copy:
+     - `VITE_FIREBASE_API_KEY`
+     - `VITE_FIREBASE_AUTH_DOMAIN`
+     - `VITE_FIREBASE_PROJECT_ID`
+     - `VITE_FIREBASE_APP_ID`
+     - optional: storage/sender/measurement values
+   - Add your production domain in Firebase Authorized Domains.
+
+2. Neon database:
+   - Create Neon project and database.
+   - Copy connection string -> `DATABASE_URL`.
+   - Keep SSL mode enabled.
+
+3. Truecaller:
+   - Truecaller is optional for production launch.
+   - If you skip Truecaller, keep the UI button disabled and use Guest + Google auth.
+   - Create app in Truecaller Developer dashboard.
+   - Set callback URL:
+     - `https://<your-domain>/api/auth/truecaller/callback`
+   - Copy:
+     - `TRUECALLER_CLIENT_ID`
+     - `TRUECALLER_CLIENT_SECRET`
+     - `TRUECALLER_REDIRECT_URI` (same callback URL)
+   - Keep default auth/token/userinfo URLs unless dashboard says otherwise.
+
+### 3) Required Vercel environment variables
+
+Set these in Vercel Project -> Settings -> Environment Variables:
+
+- `PUBLIC_APP_URL=https://<your-production-domain>`
+- `ALLOWED_ORIGINS=https://<your-production-domain>,https://<preview-domain-if-needed>`
+- `DATABASE_URL=...`
+- `VITE_FIREBASE_API_KEY=...`
+- `VITE_FIREBASE_AUTH_DOMAIN=...`
+- `VITE_FIREBASE_PROJECT_ID=...`
+- `VITE_FIREBASE_APP_ID=...`
+- `TRUECALLER_CLIENT_ID=...`
+- `TRUECALLER_CLIENT_SECRET=...` (optional unless full Truecaller OAuth secret access is available)
+- `TRUECALLER_REDIRECT_URI=https://<your-production-domain>/api/auth/truecaller/callback`
+- `TRUECALLER_AUTH_BASE_URL=https://oauth.truecaller.com/v1/authorize`
+- `TRUECALLER_TOKEN_URL=https://oauth.truecaller.com/v1/token`
+- `TRUECALLER_USERINFO_URL=https://oauth.truecaller.com/v1/userinfo`
+- `TRUECALLER_SCOPE=openid profile phone`
+
+Optional:
+- `VITE_API_BASE_URL` (leave empty when frontend+API are same domain)
+- `VITE_ENABLE_SW=true` only after final caching validation
+
+### 4) Pre-deploy validation
+
+Run locally:
+
+```bash
+npm run check
+npm run doctor:prod
+```
+
+Both should pass for complete production readiness.
+
+### 5) Post-deploy smoke test
+
+After deployment, verify:
+
+1. `/api/health` returns API reachable + DB connected true.
+2. Guest login works.
+3. Google login works.
+4. Puzzle submit works and stage unlock works.
+5. Offline mode works and re-open keeps progress.
+6. Reconnect internet and sync succeeds.
+7. No console errors in browser.
 
 ### Vercel Troubleshooting
 
