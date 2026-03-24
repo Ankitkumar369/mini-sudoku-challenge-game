@@ -41,6 +41,7 @@ export default function App() {
     cellStats,
     activityEntries,
     unsyncedActivityCount,
+    validationState,
     latestAchievement,
     updateCell,
     useHint,
@@ -63,16 +64,21 @@ export default function App() {
   const hintLimit = puzzle?.hintLimit ?? 0;
   const hintLimitReached = hintLimit > 0 && hintsUsed >= hintLimit;
   const puzzleLabel = puzzle?.puzzleTitle || "Daily Puzzle";
+  const puzzleRules = puzzle?.rules || [];
+  const violationCount =
+    Number(validationState?.duplicateCount || 0) +
+    Number(validationState?.clueViolationCount || 0) +
+    Number(validationState?.givenMismatchCount || 0);
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-[#0c1a4b] via-[#181f58] to-[#0c1a4b] px-4 py-10 text-[#e8e6e6]">
-      <section className="mx-auto flex w-full max-w-3xl flex-col gap-6 rounded-3xl border border-[rgba(44,49,136,0.55)] bg-[rgba(12,26,75,0.74)] p-6 shadow-2xl backdrop-blur">
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top,#15357f_0%,#101a48_42%,#091335_100%)] px-3 py-6 text-[#f2f6ff] sm:px-5 sm:py-8">
+      <section className="mx-auto flex w-full max-w-5xl flex-col gap-5 rounded-3xl border border-[rgba(125,160,255,0.22)] bg-[rgba(8,19,55,0.82)] p-4 shadow-2xl backdrop-blur sm:gap-6 sm:p-6">
         {/* Header: app branding + streak + backend status */}
         <header className="space-y-3">
           <p className="text-xs uppercase tracking-[0.25em] text-[rgba(248,201,180,0.85)]">
             Capstone Project
           </p>
-          <h1 className="text-3xl font-bold sm:text-4xl">Mini Sudoko Challenge Game</h1>
+          <h1 className="text-3xl font-bold leading-tight sm:text-4xl">Mini Sudoku Challenge Game</h1>
           <p className="text-sm text-[rgba(232,230,230,0.88)]">{subtitle}</p>
           <p className="inline-flex w-fit items-center gap-2 rounded-full border border-[rgba(235,91,44,0.6)] bg-[rgba(235,91,44,0.2)] px-3 py-1 text-xs font-semibold text-[#f8c9b4]">
             Streak {currentStreak} day{currentStreak === 1 ? "" : "s"}
@@ -157,20 +163,32 @@ export default function App() {
         )}
 
         {/* Puzzle panel: board, timer, hints, submit, reset, save */}
-        <section className="space-y-4 rounded-2xl border border-[rgba(44,49,136,0.78)] bg-[rgba(24,41,101,0.45)] p-4">
+        <section className="space-y-4 rounded-2xl border border-[rgba(88,124,214,0.64)] bg-[rgba(17,35,92,0.46)] p-4">
           <div className="space-y-2">
             <div>
               <p className="text-xs uppercase tracking-[0.2em] text-[#f8c9b4]">Daily Puzzle</p>
-              <h3 className="text-lg font-semibold text-[#e8e6e6]">
+              <h3 className="text-base font-semibold text-[#f2f6ff] sm:text-lg">
                 {puzzleLabel}: fill every row and column with numbers 1 to {GRID_SIZE}
               </h3>
             </div>
+            {puzzleRules.length ? (
+              <div className="rounded-xl border border-[rgba(125,160,255,0.3)] bg-[rgba(7,19,56,0.62)] p-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.15em] text-[rgba(182,206,255,0.95)]">
+                  Rules
+                </p>
+                <ul className="mt-2 space-y-1 text-xs text-[rgba(230,238,255,0.9)]">
+                  {puzzleRules.map((rule) => (
+                    <li key={rule}>- {rule}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
 
           {puzzleLoading ? (
             <p className="text-sm text-[rgba(232,230,230,0.88)]">Loading puzzle...</p>
           ) : (
-            <div className="w-full max-w-md rounded-2xl border border-[rgba(44,49,136,0.65)] bg-[rgba(12,26,75,0.35)] p-3">
+            <div className="w-full max-w-md rounded-2xl border border-[rgba(88,124,214,0.58)] bg-[rgba(7,19,56,0.72)] p-3">
               <div className="mb-3 grid grid-cols-2 gap-2 text-xs text-[rgba(232,230,230,0.9)] sm:grid-cols-4">
                 <p>Date: {puzzle?.date || "-"}</p>
                 <p>Type: {puzzle?.puzzleType || "-"}</p>
@@ -179,7 +197,17 @@ export default function App() {
                   Filled: {cellStats.filledEditable}/{cellStats.totalEditable}
                 </p>
               </div>
-              <PuzzleGrid puzzle={puzzle} grid={grid} onUpdate={updateCell} />
+              <PuzzleGrid
+                puzzle={puzzle}
+                grid={grid}
+                onUpdate={updateCell}
+                validationState={validationState}
+              />
+              {violationCount > 0 ? (
+                <p className="mt-3 rounded-lg border border-[rgba(255,98,124,0.56)] bg-[rgba(120,26,44,0.28)] px-3 py-2 text-xs text-[#ffd9e2]">
+                  Active rule issues: {violationCount}. Fix highlighted cells/clues and submit again.
+                </p>
+              ) : null}
             </div>
           )}
 

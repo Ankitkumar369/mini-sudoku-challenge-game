@@ -7,6 +7,7 @@ import {
   createInitialGrid,
   evaluateSubmission,
   findHintCell,
+  getGridValidationState,
   getPuzzleTypeForDate,
   getSolutionForDate,
 } from "../shared/dailyPuzzle.js";
@@ -32,7 +33,7 @@ test("createDailyPuzzle is deterministic for the same date", () => {
   assert.deepEqual(first, second);
   assert.equal(first.size, GRID_SIZE);
   assert.equal(first.date, "2026-02-11");
-  assert.ok([7, 9].includes(countGivens(first.givens)));
+  assert.ok([6, 9].includes(countGivens(first.givens)));
   assert.ok(Object.values(PUZZLE_TYPES).includes(first.puzzleType));
 });
 
@@ -78,4 +79,28 @@ test("getPuzzleTypeForDate can resolve different types across days", () => {
 
   assert.ok(Object.values(PUZZLE_TYPES).includes(typeA));
   assert.ok(Object.values(PUZZLE_TYPES).includes(typeB));
+});
+
+test("challenge puzzle includes deterministic skyscraper clues", () => {
+  const puzzle = createDailyPuzzle("2026-02-11", PUZZLE_TYPES.CHALLENGE);
+
+  assert.ok(puzzle.clues);
+  assert.equal(puzzle.clues.top.length, GRID_SIZE);
+  assert.equal(puzzle.clues.right.length, GRID_SIZE);
+  assert.equal(puzzle.clues.bottom.length, GRID_SIZE);
+  assert.equal(puzzle.clues.left.length, GRID_SIZE);
+});
+
+test("grid validation flags duplicate violations", () => {
+  const puzzle = createDailyPuzzle("2026-02-11", PUZZLE_TYPES.CLASSIC);
+  const grid = createInitialGrid(puzzle.givens);
+
+  grid[0][0] = 1;
+  grid[0][1] = 1;
+
+  const state = getGridValidationState("2026-02-11", grid, PUZZLE_TYPES.CLASSIC);
+
+  assert.equal(state.hasConflicts, true);
+  assert.ok(state.duplicateCount > 0);
+  assert.ok(state.conflictCellKeys.length > 0);
 });

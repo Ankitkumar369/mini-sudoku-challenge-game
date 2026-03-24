@@ -16,6 +16,7 @@ import {
   createInitialGrid,
   evaluateSubmission,
   findHintCell,
+  getGridValidationState,
 } from "../../shared/dailyPuzzle";
 import { calculateCurrentStreak } from "../heatmap/heatmapLogic";
 import {
@@ -312,6 +313,21 @@ export function useDailyPuzzle(user) {
     return activityEntries.filter((entry) => entry.solved && !entry.synced).length;
   }, [activityEntries]);
 
+  const validationState = useMemo(() => {
+    if (!puzzle) {
+      return {
+        hasConflicts: false,
+        conflictCellKeys: [],
+        clueViolationKeys: [],
+        duplicateCount: 0,
+        clueViolationCount: 0,
+        givenMismatchCount: 0,
+      };
+    }
+
+    return getGridValidationState(puzzle.date, grid, puzzle.puzzleType);
+  }, [grid, puzzle]);
+
   const updateCell = useCallback(
     async (row, col, value) => {
       if (!puzzle || puzzle.givens[row][col] !== null) {
@@ -451,6 +467,7 @@ export function useDailyPuzzle(user) {
           score: calculateScore(localResult.solved, hintsUsed, liveElapsedSeconds),
           correctCells: localResult.correctEditableCells,
           totalCells: localResult.totalEditableCells,
+          ruleViolations: localResult.ruleViolations,
           persisted: false,
         };
       }
@@ -460,6 +477,8 @@ export function useDailyPuzzle(user) {
       const score = Number(payload.score) || 0;
       const message = solved
         ? `Solved. Score ${score}.`
+        : payload.ruleViolations > 0
+        ? `Rules not satisfied yet. Resolve ${payload.ruleViolations} violation(s).`
         : `Not solved yet (${payload.correctCells}/${payload.totalCells} correct editable cells).`;
 
       setSubmitResult({
@@ -612,6 +631,7 @@ export function useDailyPuzzle(user) {
     cellStats,
     activityEntries,
     unsyncedActivityCount,
+    validationState,
     latestAchievement,
     updateCell,
     useHint,

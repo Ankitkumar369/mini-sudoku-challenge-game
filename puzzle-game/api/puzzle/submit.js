@@ -86,6 +86,7 @@ function createSubmitResponse(evaluation, score, persisted) {
     score,
     correctCells: evaluation.correctEditableCells,
     totalCells: evaluation.totalEditableCells,
+    ruleViolations: evaluation.ruleViolations,
     puzzleDate: evaluation.puzzle.date,
     puzzleType: evaluation.puzzle.puzzleType,
     persisted,
