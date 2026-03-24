@@ -1,7 +1,5 @@
-// Imports: auth SDK utilities and environment helper for API URL resolution.
-import { GoogleAuthProvider, signInWithPopup, signOut } from "firebase/auth";
-import { auth } from "../lib/firebase";
-import { env } from "../lib/env";
+// Imports: environment helper for API URL resolution and config checks.
+import { env, isFirebaseConfigured } from "../lib/env";
 
 // Supports same-origin and deployed API base URL configuration.
 function makeApiUrl(path) {
@@ -33,8 +31,18 @@ async function parseJsonResponse(response) {
 }
 
 export async function signInWithGoogle() {
-  if (!auth) {
+  if (!isFirebaseConfigured) {
     throw new Error("Firebase is not configured. Add VITE_FIREBASE_* variables.");
+  }
+
+  // Lazy-load Firebase auth only when user starts Google sign-in.
+  const [{ GoogleAuthProvider, signInWithPopup }, { auth }] = await Promise.all([
+    import("firebase/auth"),
+    import("../lib/firebase"),
+  ]);
+
+  if (!auth) {
+    throw new Error("Firebase auth instance is unavailable.");
   }
 
   // Firebase popup sign-in handles Google OAuth in browser.
@@ -61,6 +69,15 @@ export async function signInAsGuest() {
 }
 
 export async function signOutUser() {
+  if (!isFirebaseConfigured) {
+    return;
+  }
+
+  const [{ signOut }, { auth }] = await Promise.all([
+    import("firebase/auth"),
+    import("../lib/firebase"),
+  ]);
+
   if (auth) {
     await signOut(auth);
   }
