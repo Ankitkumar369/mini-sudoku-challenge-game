@@ -1,12 +1,22 @@
+function cleanEnvValue(value) {
+  const raw = String(value || "").trim();
+
+  if (!raw) {
+    return "";
+  }
+
+  return raw.replace(/^['"]|['"]$/g, "");
+}
+
 const env = {
-  apiBaseUrl: import.meta.env.VITE_API_BASE_URL || "",
-  firebaseApiKey: import.meta.env.VITE_FIREBASE_API_KEY || "",
-  firebaseAuthDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "",
-  firebaseProjectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "",
-  firebaseAppId: import.meta.env.VITE_FIREBASE_APP_ID || "",
-  firebaseStorageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "",
-  firebaseMessagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "",
-  firebaseMeasurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "",
+  apiBaseUrl: cleanEnvValue(import.meta.env.VITE_API_BASE_URL),
+  firebaseApiKey: cleanEnvValue(import.meta.env.VITE_FIREBASE_API_KEY),
+  firebaseAuthDomain: cleanEnvValue(import.meta.env.VITE_FIREBASE_AUTH_DOMAIN),
+  firebaseProjectId: cleanEnvValue(import.meta.env.VITE_FIREBASE_PROJECT_ID),
+  firebaseAppId: cleanEnvValue(import.meta.env.VITE_FIREBASE_APP_ID),
+  firebaseStorageBucket: cleanEnvValue(import.meta.env.VITE_FIREBASE_STORAGE_BUCKET),
+  firebaseMessagingSenderId: cleanEnvValue(import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID),
+  firebaseMeasurementId: cleanEnvValue(import.meta.env.VITE_FIREBASE_MEASUREMENT_ID),
 };
 
 export const isFirebaseConfigured =
